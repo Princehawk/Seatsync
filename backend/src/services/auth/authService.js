@@ -272,3 +272,12 @@ export const refreshSession = async refreshToken => {
     ...tokens
   }
 }
+
+export const rotateSession = async refreshToken => {
+  const result = await refreshSession(refreshToken)
+  return {
+    user: result.user,
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken
+  }
+}

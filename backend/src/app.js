@@ -17,6 +17,12 @@ import notificationRoutes from './routes/notificationRoutes.js'
 import databaseRoutes from './routes/databaseRoutes.js'
 import { ensureDefaultAdmin } from './services/auth/authService.js'
 import { requireAuth } from './middleware/authMiddleware.js'
+import {
+  installSocketHandlers,
+  emitSocketEvent,
+  joinRoom,
+  leaveRoom
+} from './socket/socketEvents.js'
 
 dotenv.config()
 
@@ -27,6 +33,10 @@ const io = new Server(httpServer, {
 })
 
 globalThis.__SEATSYNC_IO__ = io
+
+globalThis.__SEATSYNC_EMIT__ = emitSocketEvent
+
+globalThis.__SEATSYNC_ROOM__ = { joinRoom, leaveRoom }
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -80,16 +90,14 @@ app.use('/api/notifications', requireAuth, notificationRoutes)
 app.use('/api/database', requireAuth, databaseRoutes)
 
 app.use((err, req, res, next) => {
-  console.error(err)
+  console.error('[APP_ERROR]', err)
   res.status(500).json({ message: 'Internal server error' })
 })
 
 ensureDefaultAdmin().catch(error => {
-  console.error('Default admin seed failed:', error.message)
+  console.error('[ADMIN_SEED_ERROR]', error.message)
 })
 
-io.on('connection', socket => {
-  socket.emit('welcome', { message: 'Connected to SeatSync realtime service' })
-})
+installSocketHandlers(io)
 
 export { app, httpServer, io }

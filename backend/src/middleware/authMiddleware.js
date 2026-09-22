@@ -1,5 +1,11 @@
 import jwt from 'jsonwebtoken'
 
+import {
+  refreshSession,
+  setAuthCookies,
+  verifyRefreshToken
+} from '../services/auth/authService.js'
+
 const JWT_SECRET = process.env.JWT_SECRET || 'seatsync-dev-secret'
 
 const verifyToken = (token, expectedType = 'access') => {
@@ -10,7 +16,7 @@ const verifyToken = (token, expectedType = 'access') => {
   return decoded
 }
 
-export const requireAuth = (req, res, next) => {
+export const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization
   const tokenFromHeader =
     authHeader && authHeader.startsWith('Bearer ')
@@ -25,9 +31,34 @@ export const requireAuth = (req, res, next) => {
 
   try {
     req.user = verifyToken(token, 'access')
-    next()
+    return next()
   } catch (error) {
-    return res.status(401).json({ message: 'Invalid or expired token.' })
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Invalid or expired token.' })
+    }
+
+    try {
+      const refreshed = await refreshSession(refreshToken)
+      const user = refreshed.user
+
+      req.user = {
+        id: user.id,
+        email: user.email,
+        roles: user.roles || []
+      }
+
+      setAuthCookies(res, refreshed.accessToken, refreshed.refreshToken)
+      req.accessToken = refreshed.accessToken
+      req.refreshToken = refreshed.refreshToken
+
+      return next()
+    } catch (refreshError) {
+      console.error('Access token refresh failed:', refreshError.message)
+      return res
+        .status(401)
+        .json({ message: 'Session expired. Please log in again.' })
+    }
   }
 }
 
@@ -39,7 +70,7 @@ export const requireRefreshToken = (req, res, next) => {
   }
 
   try {
-    req.user = verifyToken(refreshToken, 'refresh')
+    req.user = verifyRefreshToken(refreshToken)
     next()
   } catch (error) {
     return res
@@ -61,11 +92,9 @@ export const requireRole =
     const hasAccess = allowedRoles.some(role => userRoles.includes(role))
 
     if (!hasAccess) {
-      return res
-        .status(403)
-        .json({
-          message: 'You do not have permission to access this resource.'
-        })
+      return res.status(403).json({
+        message: 'You do not have permission to access this resource.'
+      })
     }
 
     next()
