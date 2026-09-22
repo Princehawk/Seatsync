@@ -1,0 +1,24 @@
+import {
+  createTimetableEntry,
+  listTimetableEntries,
+  listAvailability
+} from '../services/timetableDomainService.js'
+
+export const getTimetable = async (req, res) => {
+  res.json({ data: await listTimetableEntries() })
+}
+
+export const addTimetableEntry = async (req, res) => {
+  const result = await createTimetableEntry(req.body)
+
+  if (!result.valid) {
+    return res.status(409).json({ valid: false, conflicts: result.conflicts })
+  }
+
+  return res.status(201).json({ valid: true, data: result.data })
+}
+
+export const getAvailability = async (req, res) => {
+  const result = await listAvailability(req.query)
+  res.json({ data: result })
+}
