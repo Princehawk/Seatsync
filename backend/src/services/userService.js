@@ -23,9 +23,32 @@ const serializeRole = row => ({
   updatedAt: row.updatedAt ?? row.updated_at
 })
 
+const normalizeRoles = value => {
+  if (!value) return []
+  if (Array.isArray(value)) return value.filter(Boolean)
+  return String(value)
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
 export const listUsers = async () => {
-  const rows = await listRows('users')
-  return rows.map(serializeUser)
+  const rows = await query(`
+    SELECT u.*, GROUP_CONCAT(r.name ORDER BY r.name SEPARATOR ',') AS roles
+    FROM users u
+    LEFT JOIN user_roles ur ON ur.user_id = u.id
+    LEFT JOIN roles r ON r.id = ur.role_id
+    GROUP BY u.id
+    ORDER BY u.id
+  `)
+
+  return rows.map(row => {
+    const user = serializeUser(row)
+    return {
+      ...user,
+      roles: normalizeRoles(row.roles)
+    }
+  })
 }
 
 export const createUser = async payload => {

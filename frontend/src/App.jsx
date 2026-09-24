@@ -1,14 +1,23 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
+import ProtectedRoute from './components/ProtectedRoute'
+import RoleProtectedRoute from './components/RoleProtectedRoute'
 import Sidebar from './components/Sidebar'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import UnauthorizedPage from './pages/UnauthorizedPage'
 import DashboardPage from './pages/DashboardPage'
 import TimetablePage from './pages/TimetablePage'
 import VenuesPage from './pages/VenuesPage'
 import ExamsPage from './pages/ExamsPage'
 import NotificationsPage from './pages/NotificationsPage'
 import AdminUsersPage from './pages/AdminUsersPage'
+import CoursesPage from './pages/CoursesPage'
+import CohortsPage from './pages/CohortsPage'
+import StudentsPage from './pages/StudentsPage'
+import LecturersPage from './pages/LecturersPage'
+import AcademicSetupPage from './pages/AcademicSetupPage'
+import ReportsPage from './pages/ReportsPage'
 import './App.css'
 
 function ProtectedLayout () {
@@ -22,9 +31,22 @@ function ProtectedLayout () {
           <Route path='/dashboard' element={<DashboardPage />} />
           <Route path='/timetable' element={<TimetablePage />} />
           <Route path='/venues' element={<VenuesPage />} />
+          <Route path='/courses' element={<CoursesPage />} />
+          <Route path='/cohorts' element={<CohortsPage />} />
+          <Route path='/students' element={<StudentsPage />} />
+          <Route path='/lecturers' element={<LecturersPage />} />
+          <Route path='/academic/setup' element={<AcademicSetupPage />} />
+          <Route path='/reports' element={<ReportsPage />} />
           <Route path='/exams' element={<ExamsPage />} />
           <Route path='/notifications' element={<NotificationsPage />} />
-          <Route path='/admin/users' element={<AdminUsersPage />} />
+          <Route
+            path='/admin/users'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN']}>
+                <AdminUsersPage />
+              </RoleProtectedRoute>
+            }
+          />
           <Route
             path='/settings'
             element={
@@ -38,6 +60,7 @@ function ProtectedLayout () {
               </div>
             }
           />
+          <Route path='/unauthorized' element={<UnauthorizedPage />} />
           <Route path='*' element={<Navigate to='/dashboard' replace />} />
         </Routes>
       </main>
@@ -62,9 +85,14 @@ export default function App () {
         path='/register'
         element={user ? <Navigate to='/dashboard' replace /> : <RegisterPage />}
       />
+      <Route path='/unauthorized' element={<UnauthorizedPage />} />
       <Route
         path='/*'
-        element={user ? <ProtectedLayout /> : <Navigate to='/login' replace />}
+        element={
+          <ProtectedRoute>
+            <ProtectedLayout />
+          </ProtectedRoute>
+        }
       />
     </Routes>
   )

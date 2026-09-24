@@ -12,6 +12,10 @@ import {
   addSemester,
   getCohorts,
   addCohort,
+  getStudents,
+  addStudent,
+  getLecturers,
+  addLecturer,
   getCourses,
   addCourse,
   getVenueTypes,
@@ -55,6 +59,18 @@ router.get(
 router.post('/semesters', requireRole('ADMIN'), addSemester)
 router.get('/cohorts', requireRole('ADMIN', 'LECTURER', 'STUDENT'), getCohorts)
 router.post('/cohorts', requireRole('ADMIN'), addCohort)
+router.get(
+  '/students',
+  requireRole('ADMIN', 'LECTURER', 'STUDENT'),
+  getStudents
+)
+router.post('/students', requireRole('ADMIN'), addStudent)
+router.get(
+  '/lecturers',
+  requireRole('ADMIN', 'LECTURER', 'STUDENT'),
+  getLecturers
+)
+router.post('/lecturers', requireRole('ADMIN'), addLecturer)
 router.get('/courses', requireRole('ADMIN', 'LECTURER', 'STUDENT'), getCourses)
 router.post('/courses', requireRole('ADMIN'), addCourse)
 router.get(

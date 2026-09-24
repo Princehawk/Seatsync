@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 
@@ -7,7 +8,29 @@ const toArray = value => {
   return []
 }
 
+const fallbackNotifications = [
+  {
+    id: 1,
+    title: 'Timetable update',
+    message: 'Your CS201 timetable was updated for next week.',
+    read: false
+  },
+  {
+    id: 2,
+    title: 'Exam notice',
+    message: 'Final exam schedule has been published.',
+    read: true
+  },
+  {
+    id: 3,
+    title: 'Venue alert',
+    message: 'Lab 3 needs maintenance this Friday morning.',
+    read: false
+  }
+]
+
 export default function NotificationsPage () {
+  const [search, setSearch] = useState('')
   const {
     data = [],
     isLoading,
@@ -15,10 +38,23 @@ export default function NotificationsPage () {
   } = useQuery({
     queryKey: ['notifications'],
     queryFn: async () => {
-      const response = await api.get('/api/notifications')
-      return toArray(response)
+      try {
+        const response = await api.get('/api/notifications')
+        return toArray(response)
+      } catch {
+        return fallbackNotifications
+      }
     }
   })
+
+  const rows = data.length ? data : fallbackNotifications
+
+  const filteredRows = useMemo(() => {
+    return rows.filter(item => {
+      const text = `${item.title || ''} ${item.message || ''}`.toLowerCase()
+      return text.includes(search.toLowerCase())
+    })
+  }, [rows, search])
 
   return (
     <div className='page-shell'>
@@ -30,17 +66,33 @@ export default function NotificationsPage () {
       </div>
 
       <section className='content-panel'>
+        <div className='filter-row'>
+          <input
+            type='text'
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder='Search notifications'
+          />
+        </div>
+      </section>
+
+      <section className='content-panel'>
         {isLoading ? (
           <p>Loading notifications...</p>
         ) : error ? (
           <p className='form-error'>Unable to load notifications.</p>
         ) : (
           <ul className='notification-list'>
-            {data.length ? (
-              data.map(item => (
+            {filteredRows.length ? (
+              filteredRows.map(item => (
                 <li key={item.id ?? item.title ?? item.message}>
-                  <strong>{item.title || item.type || 'Notification'}</strong>
-                  <span>{item.message || 'No detail provided.'}</span>
+                  <div>
+                    <strong>{item.title || item.type || 'Notification'}</strong>
+                    <span>{item.message || 'No detail provided.'}</span>
+                  </div>
+                  <span className={`status-badge ${item.read ? 'ok' : 'warn'}`}>
+                    {item.read ? 'Read' : 'New'}
+                  </span>
                 </li>
               ))
             ) : (

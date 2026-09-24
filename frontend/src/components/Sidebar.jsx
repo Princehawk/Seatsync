@@ -11,20 +11,66 @@ import {
   faGear,
   faRightFromBracket,
   faBars,
-  faXmark
+  faXmark,
+  faBookOpen,
+  faUserGraduate,
+  faChalkboardTeacher,
+  faUsersCog,
+  faSchool,
+  faChartColumn
 } from '@fortawesome/free-solid-svg-icons'
 
-const navItems = [
-  { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
-  { label: 'Timetable', icon: faTableCells, to: '/timetable' },
-  { label: 'Venues', icon: faBuilding, to: '/venues' },
-  { label: 'Exams', icon: faClipboardList, to: '/exams' },
-  { label: 'Notifications', icon: faBell, to: '/notifications' }
-]
+const navByRole = {
+  ADMIN: [
+    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
+    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
+    { label: 'Venues', icon: faBuilding, to: '/venues' },
+    { label: 'Courses', icon: faBookOpen, to: '/courses' },
+    { label: 'Cohorts', icon: faUsers, to: '/cohorts' },
+    { label: 'Students', icon: faUserGraduate, to: '/students' },
+    { label: 'Lecturers', icon: faChalkboardTeacher, to: '/lecturers' },
+    { label: 'Academic setup', icon: faSchool, to: '/academic/setup' },
+    { label: 'Reports', icon: faChartColumn, to: '/reports' },
+    { label: 'Exams', icon: faClipboardList, to: '/exams' },
+    { label: 'Notifications', icon: faBell, to: '/notifications' },
+    { label: 'Users', icon: faUsersCog, to: '/admin/users' }
+  ],
+  LECTURER: [
+    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
+    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
+    { label: 'Venues', icon: faBuilding, to: '/venues' },
+    { label: 'Courses', icon: faBookOpen, to: '/courses' },
+    { label: 'Exams', icon: faClipboardList, to: '/exams' },
+    { label: 'Notifications', icon: faBell, to: '/notifications' }
+  ],
+  STUDENT: [
+    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
+    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
+    { label: 'Venues', icon: faBuilding, to: '/venues' },
+    { label: 'Exams', icon: faClipboardList, to: '/exams' },
+    { label: 'Notifications', icon: faBell, to: '/notifications' }
+  ],
+  CLASS_REP: [
+    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
+    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
+    { label: 'Venues', icon: faBuilding, to: '/venues' },
+    { label: 'Cohorts', icon: faUsers, to: '/cohorts' },
+    { label: 'Exams', icon: faClipboardList, to: '/exams' },
+    { label: 'Notifications', icon: faBell, to: '/notifications' }
+  ]
+}
 
 export default function Sidebar ({ user, onLogout }) {
   const userRoles = user?.roles || []
   const [collapsed, setCollapsed] = useState(false)
+
+  const visibleNav = userRoles.length
+    ? userRoles.flatMap(role => navByRole[role] || [])
+    : navByRole.STUDENT
+
+  const uniqueNav = Array.from(
+    new Map(visibleNav.map(item => [item.to, item])).values()
+  )
 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -47,19 +93,12 @@ export default function Sidebar ({ user, onLogout }) {
       </div>
 
       <nav className='sidebar-nav' aria-label='Main navigation'>
-        {navItems.map(item => (
+        {uniqueNav.map(item => (
           <NavLink key={item.to} to={item.to} className='nav-item'>
             <FontAwesomeIcon icon={item.icon} />
             {!collapsed && <span>{item.label}</span>}
           </NavLink>
         ))}
-
-        {userRoles.includes('ADMIN') && (
-          <NavLink to='/admin/users' className='nav-item'>
-            <FontAwesomeIcon icon={faUsers} />
-            {!collapsed && <span>Users</span>}
-          </NavLink>
-        )}
 
         <NavLink to='/settings' className='nav-item'>
           <FontAwesomeIcon icon={faGear} />

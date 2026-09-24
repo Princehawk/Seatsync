@@ -55,7 +55,7 @@ export default function AdminUsersPage () {
                     </td>
                     <td>{user.email || 'N/A'}</td>
                     <td>
-                      {Array.isArray(user.roles)
+                      {Array.isArray(user.roles) && user.roles.length
                         ? user.roles.join(', ')
                         : user.role || 'USER'}
                     </td>

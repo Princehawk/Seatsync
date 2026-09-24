@@ -5,6 +5,8 @@ import {
   listAcademicYears,
   listSemesters,
   listCohorts,
+  listStudents,
+  listLecturers,
   listCourses,
   listVenueTypes,
   listVenues,
@@ -14,6 +16,8 @@ import {
   createAcademicYear,
   createSemester,
   createCohort,
+  createStudent,
+  createLecturer,
   createCourse,
   createVenueType,
   createVenue
@@ -65,6 +69,22 @@ export const getCohorts = async (req, res) => {
 
 export const addCohort = async (req, res) => {
   res.status(201).json({ data: await createCohort(req.body) })
+}
+
+export const getStudents = async (req, res) => {
+  res.json({ data: await listStudents() })
+}
+
+export const addStudent = async (req, res) => {
+  res.status(201).json({ data: await createStudent(req.body) })
+}
+
+export const getLecturers = async (req, res) => {
+  res.json({ data: await listLecturers() })
+}
+
+export const addLecturer = async (req, res) => {
+  res.status(201).json({ data: await createLecturer(req.body) })
 }
 
 export const getCourses = async (req, res) => {
