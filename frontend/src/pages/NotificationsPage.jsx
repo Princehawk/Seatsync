@@ -8,27 +8,6 @@ const toArray = value => {
   return []
 }
 
-const fallbackNotifications = [
-  {
-    id: 1,
-    title: 'Timetable update',
-    message: 'Your CS201 timetable was updated for next week.',
-    read: false
-  },
-  {
-    id: 2,
-    title: 'Exam notice',
-    message: 'Final exam schedule has been published.',
-    read: true
-  },
-  {
-    id: 3,
-    title: 'Venue alert',
-    message: 'Lab 3 needs maintenance this Friday morning.',
-    read: false
-  }
-]
-
 export default function NotificationsPage () {
   const [search, setSearch] = useState('')
   const {
@@ -38,16 +17,12 @@ export default function NotificationsPage () {
   } = useQuery({
     queryKey: ['notifications'],
     queryFn: async () => {
-      try {
-        const response = await api.get('/api/notifications')
-        return toArray(response)
-      } catch {
-        return fallbackNotifications
-      }
+      const response = await api.get('/api/notifications')
+      return toArray(response)
     }
   })
 
-  const rows = data.length ? data : fallbackNotifications
+  const rows = data || []
 
   const filteredRows = useMemo(() => {
     return rows.filter(item => {
@@ -55,6 +30,15 @@ export default function NotificationsPage () {
       return text.includes(search.toLowerCase())
     })
   }, [rows, search])
+
+  const markRead = async id => {
+    try {
+      await api.patch(`/api/notifications/${id}/read`, {})
+      window.location.reload()
+    } catch (error) {
+      console.error('Failed to mark notification read:', error)
+    }
+  }
 
   return (
     <div className='page-shell'>
@@ -90,9 +74,22 @@ export default function NotificationsPage () {
                     <strong>{item.title || item.type || 'Notification'}</strong>
                     <span>{item.message || 'No detail provided.'}</span>
                   </div>
-                  <span className={`status-badge ${item.read ? 'ok' : 'warn'}`}>
-                    {item.read ? 'Read' : 'New'}
-                  </span>
+                  <div className='toolbar-actions compact'>
+                    <span
+                      className={`status-badge ${item.read ? 'ok' : 'warn'}`}
+                    >
+                      {item.read ? 'Read' : 'New'}
+                    </span>
+                    {!item.read && (
+                      <button
+                        type='button'
+                        className='secondary-button'
+                        onClick={() => markRead(item.id)}
+                      >
+                        Mark read
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))
             ) : (

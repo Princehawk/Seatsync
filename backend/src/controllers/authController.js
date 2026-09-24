@@ -5,6 +5,25 @@ import {
   clearAuthCookies,
   setAuthCookies
 } from '../services/auth/authService.js'
+import {
+  listFaculties,
+  listDepartments,
+  listProgrammes,
+  listAcademicYears,
+  listCohorts
+} from '../services/academicStructureService.js'
+
+export const registrationOptions = async (req, res) => {
+  res.json({
+    data: {
+      faculties: await listFaculties(),
+      departments: await listDepartments(),
+      programmes: await listProgrammes(),
+      academicYears: await listAcademicYears(),
+      cohorts: await listCohorts()
+    }
+  })
+}
 
 export const register = async (req, res) => {
   try {

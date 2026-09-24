@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 
-import { createRow, query } from '../../repositories/sqlRepository.js'
+import { createRow, query, rawQuery } from '../../repositories/sqlRepository.js'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'seatsync-dev-secret'
 
@@ -164,10 +164,22 @@ export const registerUser = async ({
   email,
   password,
   phoneNumber = null,
-  role = 'STUDENT'
+  role = 'STUDENT',
+  facultyIds = [],
+  departmentIds = [],
+  programmeIds = [],
+  programmeId,
+  academicYearId,
+  currentYear = 1
 }) => {
   if (!firstName || !lastName || !email || !password) {
     throw new Error('First name, last name, email, and password are required.')
+  }
+
+  if (!['STUDENT', 'CLASS_REP', 'LECTURER'].includes(role)) {
+    throw new Error(
+      'Only student, class representative, or lecturer registration is allowed.'
+    )
   }
 
   await ensureDefaultRoles()
@@ -190,6 +202,71 @@ export const registerUser = async ({
   const roleRow = await query('SELECT id FROM roles WHERE name = ?', [role])
   if (roleRow[0]) {
     await createRow('user_roles', { user_id: user.id, role_id: roleRow[0].id })
+  }
+
+  if (role === 'LECTURER') {
+    const faculties = facultyIds.map(Number).filter(Boolean)
+    const departments = departmentIds.map(Number).filter(Boolean)
+    const programmes = programmeIds.map(Number).filter(Boolean)
+    if (!faculties.length || !departments.length || !programmes.length) {
+      throw new Error(
+        'Lecturers must select at least one faculty, department, and programme.'
+      )
+    }
+
+    const lecturer = await createRow('lecturers', {
+      user_id: user.id,
+      staff_number: `STF-${user.id}`,
+      department_id: departments[0],
+      employment_status: 'ACTIVE'
+    })
+    for (const facultyId of faculties)
+      await rawQuery(
+        'INSERT INTO lecturer_faculties (lecturer_id, faculty_id) VALUES (?, ?)',
+        [lecturer.id, facultyId]
+      )
+    for (const departmentId of departments)
+      await rawQuery(
+        'INSERT INTO lecturer_departments (lecturer_id, department_id) VALUES (?, ?)',
+        [lecturer.id, departmentId]
+      )
+    for (const programmeIdValue of programmes)
+      await rawQuery(
+        'INSERT INTO lecturer_programmes (lecturer_id, programme_id) VALUES (?, ?)',
+        [lecturer.id, programmeIdValue]
+      )
+  }
+
+  if (role === 'STUDENT' || role === 'CLASS_REP') {
+    const selectedProgrammeId = Number(programmeId)
+    const selectedAcademicYearId = Number(academicYearId)
+    const selectedYear = Number(currentYear)
+    if (!selectedProgrammeId || !selectedAcademicYearId || !selectedYear) {
+      throw new Error(
+        'Students and class representatives must select an academic year, programme, and current year.'
+      )
+    }
+    const cohortRows = await query(
+      'SELECT id FROM cohorts WHERE programme_id = ? AND academic_year_id = ? AND (year_number = ? OR year_number IS NULL) ORDER BY year_number IS NULL, id LIMIT 1',
+      [selectedProgrammeId, selectedAcademicYearId, selectedYear]
+    )
+    const student = await createRow('students', {
+      user_id: user.id,
+      student_number: `STU-${user.id}`,
+      programme_id: selectedProgrammeId,
+      cohort_id: cohortRows[0]?.id || null,
+      admission_year: new Date().getFullYear(),
+      current_year: selectedYear,
+      status: 'ACTIVE'
+    })
+    if (role === 'CLASS_REP' && student && cohortRows[0]) {
+      await createRow('cohort_representatives', {
+        cohort_id: cohortRows[0].id,
+        student_id: student.id,
+        start_date: new Date().toISOString().slice(0, 10),
+        is_active: true
+      })
+    }
   }
 
   const roles = await getUserRoles(user.id)

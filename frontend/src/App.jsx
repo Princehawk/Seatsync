@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -22,10 +23,27 @@ import './App.css'
 
 function ProtectedLayout () {
   const { user, logout } = useAuth()
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed(value => !value)
+  }
+
+  const handleNavSelect = () => {
+    if (window.innerWidth <= 1024) {
+      setSidebarCollapsed(true)
+    }
+  }
 
   return (
-    <div className='app-shell'>
-      <Sidebar user={user} onLogout={logout} />
+    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <Sidebar
+        user={user}
+        onLogout={logout}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleToggleSidebar}
+        onNavSelect={handleNavSelect}
+      />
       <main className='main-content'>
         <Routes>
           <Route path='/dashboard' element={<DashboardPage />} />

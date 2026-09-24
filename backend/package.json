@@ -7,6 +7,14 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "node src/database/migration.js",
+    "migrate:cohorts": "node src/database/cohortCompatibilityMigration.js",
+    "migrate:units": "node src/database/unitCompatibilityMigration.js",
+    "migrate:rename-units": "node src/database/renameCoursesToUnits.js",
+    "migrate:unit-programmes": "node src/database/unitProgrammeMigration.js",
+    "migrate:unit-departments": "node src/database/unitDepartmentMigration.js",
+    "migrate:timetable-assignments": "node src/database/timetableAssignmentMigration.js",
+    "migrate:registration-profiles": "node src/database/registrationProfilesMigration.js",
+    "migrate:exam-type": "node src/database/removeExamType.js",
     "test": "node --test"
   },
   "dependencies": {

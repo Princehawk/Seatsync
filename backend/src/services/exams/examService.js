@@ -1,4 +1,9 @@
-import { createRow, listRows, query } from '../../repositories/sqlRepository.js'
+import {
+  createRow,
+  findById,
+  listRows,
+  query
+} from '../../repositories/sqlRepository.js'
 
 const toMinutes = value => {
   if (!value) return 0
@@ -27,7 +32,6 @@ export const createExam = async ({
   academicYearId,
   semesterId,
   courseId,
-  examType,
   examDate,
   startTime,
   endTime,
@@ -39,7 +43,6 @@ export const createExam = async ({
     !academicYearId ||
     !semesterId ||
     !courseId ||
-    !examType ||
     !examDate ||
     !startTime ||
     !endTime ||
@@ -57,7 +60,6 @@ export const createExam = async ({
     academic_year_id: Number(academicYearId),
     semester_id: Number(semesterId),
     course_id: Number(courseId),
-    exam_type: examType,
     exam_date: examDate,
     start_time: startTime,
     end_time: endTime,
@@ -125,6 +127,41 @@ export const allocateExamVenue = async ({
         {
           type: 'VALIDATION_ERROR',
           message: 'Exam venue payload is incomplete.'
+        }
+      ]
+    }
+  }
+
+  const venue = await findById('venues', venueId)
+  if (!venue) {
+    return {
+      valid: false,
+      conflicts: [
+        { type: 'VALIDATION_ERROR', message: 'Selected venue was not found.' }
+      ]
+    }
+  }
+
+  if (Number(allocatedCapacity) > Number(venue.capacity)) {
+    return {
+      valid: false,
+      conflicts: [
+        {
+          type: 'VENUE_CAPACITY_EXCEEDED',
+          message: `${venue.name} has a capacity of ${venue.capacity}.`
+        }
+      ]
+    }
+  }
+
+  if (Number(studentCount) > Number(allocatedCapacity)) {
+    return {
+      valid: false,
+      conflicts: [
+        {
+          type: 'ALLOCATION_EXCEEDED',
+          message:
+            'Allocated students cannot exceed the venue allocation capacity.'
         }
       ]
     }

@@ -2,6 +2,7 @@ import {
   createRow,
   findById,
   listRows,
+  rawQuery,
   updateRow
 } from '../repositories/sqlRepository.js'
 import { validateTimetableEntry } from './scheduling/conflictService.js'
@@ -46,11 +47,15 @@ export const createTimetableEntry = async payload => {
     return { valid: false, conflicts: validation.conflicts }
   }
 
+  const programmeIds = (payload.programme_ids || []).map(Number).filter(Boolean)
+  const cohortIds = (payload.cohort_ids || [payload.cohort_id])
+    .map(Number)
+    .filter(Boolean)
   const record = await createRow('timetable_entries', {
     academic_year_id: payload.academic_year_id,
     semester_id: payload.semester_id,
     course_id: payload.course_id,
-    cohort_id: payload.cohort_id,
+    cohort_id: cohortIds[0],
     lecturer_id: payload.lecturer_id,
     venue_id: payload.venue_id,
     day_of_week: payload.day_of_week,
@@ -61,6 +66,19 @@ export const createTimetableEntry = async payload => {
     created_by: payload.created_by || 1,
     updated_by: payload.updated_by || 1
   })
+
+  for (const programmeId of programmeIds) {
+    await rawQuery(
+      'INSERT INTO timetable_entry_programmes (timetable_entry_id, programme_id) VALUES (?, ?)',
+      [record.id, programmeId]
+    )
+  }
+  for (const cohortId of cohortIds) {
+    await rawQuery(
+      'INSERT INTO timetable_entry_cohorts (timetable_entry_id, cohort_id) VALUES (?, ?)',
+      [record.id, cohortId]
+    )
+  }
 
   return { valid: true, data: record }
 }

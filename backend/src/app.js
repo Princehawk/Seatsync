@@ -14,6 +14,7 @@ import venueRoutes from './routes/venueRoutes.js'
 import timetableRoutes from './routes/timetableRoutes.js'
 import examRoutes from './routes/examRoutes.js'
 import notificationRoutes from './routes/notificationRoutes.js'
+import dashboardRoutes from './routes/dashboardRoutes.js'
 import databaseRoutes from './routes/databaseRoutes.js'
 import { ensureDefaultAdmin } from './services/auth/authService.js'
 import { requireAuth } from './middleware/authMiddleware.js'
@@ -48,7 +49,7 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: Number(process.env.AUTH_RATE_LIMIT),
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many auth attempts, please try again later.' }
@@ -82,6 +83,7 @@ app.get('/api', (req, res) => {
 
 app.use('/api/auth', authRoutes)
 app.use('/api/users', requireAuth, userRoutes)
+app.use('/api/dashboard', requireAuth, dashboardRoutes)
 app.use('/api/academic', requireAuth, academicRoutes)
 app.use('/api/venues', requireAuth, venueRoutes)
 app.use('/api/timetable', requireAuth, timetableRoutes)

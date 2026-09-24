@@ -290,6 +290,55 @@ textarea {
   flex: 1;
 }
 
+.stack-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.form-grid input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+}
+
+.form-grid textarea {
+  min-height: 110px;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.table-action {
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.table-action.danger {
+  background: #f6f6f6;
+  border-color: #d9d9d9;
+}
+
+.form-error {
+  color: #5b5b5b;
+  font-weight: 600;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));
@@ -387,8 +436,14 @@ textarea {
   color: var(--text);
 }
 
+.table-panel {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .table-panel table {
   width: 100%;
+  min-width: 700px;
   border-collapse: collapse;
   margin-top: 18px;
 }
@@ -401,7 +456,10 @@ textarea {
 }
 
 .timetable-panel {
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .timetable-grid {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 
 const toArray = value => {
@@ -8,16 +8,24 @@ const toArray = value => {
   return []
 }
 
-const fallbackVenues = [
-  { id: 1, name: 'Lecture Hall A', capacity: 250, status: 'ACTIVE' },
-  { id: 2, name: 'Room 2-12', capacity: 80, status: 'BOOKED' },
-  { id: 3, name: 'Lab 3', capacity: 45, status: 'ACTIVE' },
-  { id: 4, name: 'Seminar 4', capacity: 30, status: 'MAINTENANCE' }
-]
+const emptyVenue = {
+  name: '',
+  code: '',
+  building: '',
+  room_number: '',
+  capacity: 50,
+  status: 'ACTIVE',
+  venue_type_id: '',
+  description: ''
+}
 
 export default function VenuesPage () {
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(emptyVenue)
+  const [formError, setFormError] = useState('')
 
   const {
     data = [],
@@ -26,19 +34,50 @@ export default function VenuesPage () {
   } = useQuery({
     queryKey: ['venues'],
     queryFn: async () => {
-      try {
-        const response = await api.get('/api/academic/venues')
-        return toArray(response)
-      } catch {
-        return fallbackVenues
-      }
+      const response = await api.get('/api/academic/venues')
+      return toArray(response)
     }
   })
 
-  const venues = data.length ? data : fallbackVenues
+  const { data: venueTypes = [] } = useQuery({
+    queryKey: ['venue-types'],
+    queryFn: async () => {
+      const response = await api.get('/api/academic/venue-types')
+      return toArray(response)
+    }
+  })
+
+  const venueTypeMap = Object.fromEntries(
+    (venueTypes || []).map(type => [String(type.id), type.name])
+  )
+
+  const createVenueMutation = useMutation({
+    mutationFn: async payload => {
+      const response = await api.post('/api/academic/venues', payload)
+      return response?.data ?? response
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['venues'] })
+      setShowForm(false)
+      setForm(emptyVenue)
+      setFormError('')
+    },
+    onError: err => {
+      setFormError(err.message || 'Unable to create venue.')
+    }
+  })
+
+  const deleteVenueMutation = useMutation({
+    mutationFn: async id => {
+      await api.del(`/api/academic/venues/${id}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['venues'] })
+    }
+  })
 
   const filteredVenues = useMemo(() => {
-    return venues.filter(item => {
+    return (data || []).filter(item => {
       const matchesSearch = (item.name || item.venue_name || '')
         .toLowerCase()
         .includes(search.toLowerCase())
@@ -47,7 +86,22 @@ export default function VenuesPage () {
         statusFilter === 'all' ? true : status === statusFilter
       return matchesSearch && matchesStatus
     })
-  }, [search, statusFilter, venues])
+  }, [data, search, statusFilter])
+
+  const handleSubmit = event => {
+    event.preventDefault()
+
+    if (!form.name || !form.venue_type_id) {
+      setFormError('Venue name and venue type are required.')
+      return
+    }
+
+    createVenueMutation.mutate({
+      ...form,
+      capacity: Number(form.capacity) || 0,
+      venue_type_id: Number(form.venue_type_id) || null
+    })
+  }
 
   return (
     <div className='page-shell'>
@@ -61,11 +115,159 @@ export default function VenuesPage () {
           <button type='button' className='secondary-button'>
             View availability
           </button>
-          <button type='button' className='primary-button'>
-            Create venue
+          <button
+            type='button'
+            className='primary-button'
+            onClick={() => setShowForm(value => !value)}
+          >
+            {showForm ? 'Close form' : 'Create venue'}
           </button>
         </div>
       </div>
+
+      {showForm && (
+        <section className='content-panel'>
+          <form className='stack-form' onSubmit={handleSubmit}>
+            <div className='form-grid'>
+              <label>
+                Venue name
+                <input
+                  value={form.name}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      name: event.target.value
+                    }))
+                  }
+                  placeholder='Lecture Hall A'
+                />
+              </label>
+              <label>
+                Code (optional)
+                <input
+                  value={form.code}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      code: event.target.value
+                    }))
+                  }
+                  placeholder='LHA-01'
+                />
+              </label>
+              <label>
+                Building (optional)
+                <input
+                  value={form.building}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      building: event.target.value
+                    }))
+                  }
+                  placeholder='Main Block'
+                />
+              </label>
+              <label>
+                Room number (optional)
+                <input
+                  value={form.room_number}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      room_number: event.target.value
+                    }))
+                  }
+                  placeholder='101'
+                />
+              </label>
+              <label>
+                Capacity
+                <input
+                  type='number'
+                  value={form.capacity}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      capacity: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Venue type
+                <select
+                  value={form.venue_type_id}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      venue_type_id: event.target.value
+                    }))
+                  }
+                >
+                  <option value=''>Select venue type</option>
+                  {(venueTypes || []).map(type => (
+                    <option
+                      key={type.id ?? type.name}
+                      value={type.id ?? type.name}
+                    >
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Status
+                <select
+                  value={form.status}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      status: event.target.value
+                    }))
+                  }
+                >
+                  <option value='ACTIVE'>Active</option>
+                  <option value='BOOKED'>Booked</option>
+                  <option value='MAINTENANCE'>Maintenance</option>
+                </select>
+              </label>
+              <label className='full-width'>
+                Description
+                <textarea
+                  value={form.description}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      description: event.target.value
+                    }))
+                  }
+                  placeholder='Optional description'
+                />
+              </label>
+            </div>
+
+            {formError && <p className='form-error'>{formError}</p>}
+
+            <div className='toolbar-actions'>
+              <button
+                type='submit'
+                className='primary-button'
+                disabled={createVenueMutation.isPending}
+              >
+                {createVenueMutation.isPending ? 'Saving...' : 'Save venue'}
+              </button>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setShowForm(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className='content-panel'>
         <div className='filter-row'>
@@ -125,8 +327,11 @@ export default function VenuesPage () {
                       <span>Capacity: {item.capacity || 0}</span>
                       <span>
                         Type:{' '}
-                        {item.venue_type_id ||
-                          item.venueTypeId ||
+                        {venueTypeMap[
+                          String(item.venue_type_id ?? item.venueTypeId)
+                        ] ||
+                          item.venue_type ||
+                          item.type ||
                           'General room'}
                       </span>
                     </div>
@@ -135,8 +340,13 @@ export default function VenuesPage () {
                       <button type='button' className='secondary-button'>
                         View
                       </button>
-                      <button type='button' className='primary-button'>
-                        Available
+                      <button
+                        type='button'
+                        className='table-action danger'
+                        onClick={() => deleteVenueMutation.mutate(item.id)}
+                        disabled={deleteVenueMutation.isPending}
+                      >
+                        Delete
                       </button>
                     </div>
                   </article>

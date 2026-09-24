@@ -1,76 +1,222 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
-  faChartPie,
-  faTableCells,
-  faBuilding,
-  faClipboardList,
+  faAngleDown,
+  faBars,
   faBell,
-  faUsers,
+  faBookOpen,
+  faBuilding,
+  faChartColumn,
+  faChartPie,
+  faClipboardList,
   faGear,
   faRightFromBracket,
-  faBars,
-  faXmark,
-  faBookOpen,
-  faUserGraduate,
-  faChalkboardTeacher,
-  faUsersCog,
   faSchool,
-  faChartColumn
+  faTableCells,
+  faUserGraduate,
+  faUsers,
+  faUsersCog,
+  faXmark
 } from '@fortawesome/free-solid-svg-icons'
 
 const navByRole = {
   ADMIN: [
-    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
-    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
-    { label: 'Venues', icon: faBuilding, to: '/venues' },
-    { label: 'Courses', icon: faBookOpen, to: '/courses' },
-    { label: 'Cohorts', icon: faUsers, to: '/cohorts' },
-    { label: 'Students', icon: faUserGraduate, to: '/students' },
-    { label: 'Lecturers', icon: faChalkboardTeacher, to: '/lecturers' },
-    { label: 'Academic setup', icon: faSchool, to: '/academic/setup' },
-    { label: 'Reports', icon: faChartColumn, to: '/reports' },
-    { label: 'Exams', icon: faClipboardList, to: '/exams' },
-    { label: 'Notifications', icon: faBell, to: '/notifications' },
-    { label: 'Users', icon: faUsersCog, to: '/admin/users' }
+    {
+      group: 'Overview',
+      label: 'Dashboard',
+      icon: faChartPie,
+      to: '/dashboard'
+    },
+    {
+      group: 'Academic',
+      label: 'Units',
+      icon: faBookOpen,
+      to: '/courses'
+    },
+    { group: 'Academic', label: 'Cohorts', icon: faUsers, to: '/cohorts' },
+    {
+      group: 'Academic',
+      label: 'Students',
+      icon: faUserGraduate,
+      to: '/students'
+    },
+    {
+      group: 'Academic',
+      label: 'Lecturers',
+      icon: faUsersCog,
+      to: '/lecturers'
+    },
+    {
+      group: 'Academic',
+      label: 'Academic setup',
+      icon: faSchool,
+      to: '/academic/setup'
+    },
+    {
+      group: 'Scheduling',
+      label: 'Timetable',
+      icon: faTableCells,
+      to: '/timetable'
+    },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
+    {
+      group: 'Scheduling',
+      label: 'Exams',
+      icon: faClipboardList,
+      to: '/exams'
+    },
+    { group: 'Reports', label: 'Reports', icon: faChartColumn, to: '/reports' },
+    {
+      group: 'Communications',
+      label: 'Notifications',
+      icon: faBell,
+      to: '/notifications'
+    },
+    {
+      group: 'Administration',
+      label: 'Users',
+      icon: faUsersCog,
+      to: '/admin/users'
+    }
   ],
   LECTURER: [
-    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
-    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
-    { label: 'Venues', icon: faBuilding, to: '/venues' },
-    { label: 'Courses', icon: faBookOpen, to: '/courses' },
-    { label: 'Exams', icon: faClipboardList, to: '/exams' },
-    { label: 'Notifications', icon: faBell, to: '/notifications' }
+    {
+      group: 'Overview',
+      label: 'Dashboard',
+      icon: faChartPie,
+      to: '/dashboard'
+    },
+    { group: 'Academic', label: 'Units', icon: faBookOpen, to: '/courses' },
+    {
+      group: 'Scheduling',
+      label: 'Timetable',
+      icon: faTableCells,
+      to: '/timetable'
+    },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
+    {
+      group: 'Scheduling',
+      label: 'Exams',
+      icon: faClipboardList,
+      to: '/exams'
+    },
+    {
+      group: 'Communications',
+      label: 'Notifications',
+      icon: faBell,
+      to: '/notifications'
+    }
   ],
   STUDENT: [
-    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
-    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
-    { label: 'Venues', icon: faBuilding, to: '/venues' },
-    { label: 'Exams', icon: faClipboardList, to: '/exams' },
-    { label: 'Notifications', icon: faBell, to: '/notifications' }
+    {
+      group: 'Overview',
+      label: 'Dashboard',
+      icon: faChartPie,
+      to: '/dashboard'
+    },
+    {
+      group: 'Scheduling',
+      label: 'Timetable',
+      icon: faTableCells,
+      to: '/timetable'
+    },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
+    {
+      group: 'Scheduling',
+      label: 'Exams',
+      icon: faClipboardList,
+      to: '/exams'
+    },
+    {
+      group: 'Communications',
+      label: 'Notifications',
+      icon: faBell,
+      to: '/notifications'
+    }
   ],
   CLASS_REP: [
-    { label: 'Dashboard', icon: faChartPie, to: '/dashboard' },
-    { label: 'Timetable', icon: faTableCells, to: '/timetable' },
-    { label: 'Venues', icon: faBuilding, to: '/venues' },
-    { label: 'Cohorts', icon: faUsers, to: '/cohorts' },
-    { label: 'Exams', icon: faClipboardList, to: '/exams' },
-    { label: 'Notifications', icon: faBell, to: '/notifications' }
+    {
+      group: 'Overview',
+      label: 'Dashboard',
+      icon: faChartPie,
+      to: '/dashboard'
+    },
+    {
+      group: 'Scheduling',
+      label: 'Timetable',
+      icon: faTableCells,
+      to: '/timetable'
+    },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
+    { group: 'Academic', label: 'Cohorts', icon: faUsers, to: '/cohorts' },
+    {
+      group: 'Scheduling',
+      label: 'Exams',
+      icon: faClipboardList,
+      to: '/exams'
+    },
+    {
+      group: 'Communications',
+      label: 'Notifications',
+      icon: faBell,
+      to: '/notifications'
+    }
   ]
 }
 
-export default function Sidebar ({ user, onLogout }) {
+const groupOrder = [
+  'Overview',
+  'Academic',
+  'Scheduling',
+  'Reports',
+  'Communications',
+  'Administration'
+]
+
+export default function Sidebar ({
+  user,
+  onLogout,
+  collapsed,
+  onToggleCollapse,
+  onNavSelect
+}) {
   const userRoles = user?.roles || []
-  const [collapsed, setCollapsed] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState({
+    Overview: true,
+    Academic: true,
+    Scheduling: true,
+    Reports: true,
+    Communications: true,
+    Administration: true
+  })
 
-  const visibleNav = userRoles.length
-    ? userRoles.flatMap(role => navByRole[role] || [])
-    : navByRole.STUDENT
+  const visibleNav = useMemo(() => {
+    const items = userRoles.length
+      ? userRoles.flatMap(role => navByRole[role] || [])
+      : navByRole.STUDENT
 
-  const uniqueNav = Array.from(
-    new Map(visibleNav.map(item => [item.to, item])).values()
+    return Array.from(new Map(items.map(item => [item.to, item])).values())
+  }, [userRoles])
+
+  const navGroups = useMemo(
+    () =>
+      groupOrder
+        .map(groupName => ({
+          key: groupName,
+          label: groupName,
+          items: visibleNav.filter(item => item.group === groupName)
+        }))
+        .filter(group => group.items.length),
+    [visibleNav]
   )
+
+  const toggleGroup = groupKey => {
+    setExpandedGroups(current => ({
+      ...current,
+      [groupKey]: !current[groupKey]
+    }))
+  }
 
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -78,7 +224,7 @@ export default function Sidebar ({ user, onLogout }) {
         <button
           type='button'
           className='menu-toggle'
-          onClick={() => setCollapsed(value => !value)}
+          onClick={onToggleCollapse}
           aria-label='Toggle sidebar'
         >
           <FontAwesomeIcon icon={collapsed ? faBars : faXmark} />
@@ -93,14 +239,52 @@ export default function Sidebar ({ user, onLogout }) {
       </div>
 
       <nav className='sidebar-nav' aria-label='Main navigation'>
-        {uniqueNav.map(item => (
-          <NavLink key={item.to} to={item.to} className='nav-item'>
-            <FontAwesomeIcon icon={item.icon} />
-            {!collapsed && <span>{item.label}</span>}
-          </NavLink>
-        ))}
+        {navGroups.map(group => {
+          const isExpanded = expandedGroups[group.key] !== false
 
-        <NavLink to='/settings' className='nav-item'>
+          return (
+            <div key={group.key} className='nav-group'>
+              {!collapsed && (
+                <button
+                  type='button'
+                  className='nav-group-toggle'
+                  onClick={() => toggleGroup(group.key)}
+                >
+                  <span>{group.label}</span>
+                  <FontAwesomeIcon
+                    icon={faAngleDown}
+                    className={`nav-group-chevron ${
+                      isExpanded ? 'expanded' : ''
+                    }`}
+                  />
+                </button>
+              )}
+
+              {(isExpanded || collapsed) && (
+                <div className='nav-group-items'>
+                  {group.items.map(item => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      className='nav-item'
+                      end={item.to === '/dashboard'}
+                      onClick={() => {
+                        if (typeof onNavSelect === 'function') {
+                          onNavSelect()
+                        }
+                      }}
+                    >
+                      <FontAwesomeIcon icon={item.icon} />
+                      {!collapsed && <span>{item.label}</span>}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        <NavLink to='/settings' className='nav-item settings-link'>
           <FontAwesomeIcon icon={faGear} />
           {!collapsed && <span>Settings</span>}
         </NavLink>

@@ -20,7 +20,12 @@ import {
   createLecturer,
   createCourse,
   createVenueType,
-  createVenue
+  createVenue,
+  deleteCohort,
+  deleteStudent,
+  deleteLecturer,
+  deleteCourse,
+  deleteVenue
 } from '../services/academicStructureService.js'
 
 export const getFaculties = async (req, res) => {
@@ -71,12 +76,22 @@ export const addCohort = async (req, res) => {
   res.status(201).json({ data: await createCohort(req.body) })
 }
 
+export const removeCohort = async (req, res) => {
+  const deleted = await deleteCohort(req.params.id)
+  res.json({ success: deleted })
+}
+
 export const getStudents = async (req, res) => {
   res.json({ data: await listStudents() })
 }
 
 export const addStudent = async (req, res) => {
   res.status(201).json({ data: await createStudent(req.body) })
+}
+
+export const removeStudent = async (req, res) => {
+  const deleted = await deleteStudent(req.params.id)
+  res.json({ success: deleted })
 }
 
 export const getLecturers = async (req, res) => {
@@ -87,12 +102,22 @@ export const addLecturer = async (req, res) => {
   res.status(201).json({ data: await createLecturer(req.body) })
 }
 
+export const removeLecturer = async (req, res) => {
+  const deleted = await deleteLecturer(req.params.id)
+  res.json({ success: deleted })
+}
+
 export const getCourses = async (req, res) => {
-  res.json({ data: await listCourses() })
+  res.json({ data: await listCourses(req.user) })
 }
 
 export const addCourse = async (req, res) => {
   res.status(201).json({ data: await createCourse(req.body) })
+}
+
+export const removeCourse = async (req, res) => {
+  const deleted = await deleteCourse(req.params.id)
+  res.json({ success: deleted })
 }
 
 export const getVenueTypes = async (req, res) => {
@@ -109,4 +134,9 @@ export const getVenues = async (req, res) => {
 
 export const addVenue = async (req, res) => {
   res.status(201).json({ data: await createVenue(req.body) })
+}
+
+export const removeVenue = async (req, res) => {
+  const deleted = await deleteVenue(req.params.id)
+  res.json({ success: deleted })
 }
