@@ -14,6 +14,7 @@
     "migrate:unit-departments": "node src/database/unitDepartmentMigration.js",
     "migrate:timetable-assignments": "node src/database/timetableAssignmentMigration.js",
     "migrate:registration-profiles": "node src/database/registrationProfilesMigration.js",
+    "migrate:lecturer-units": "node src/database/lecturerUnitsMigration.js",
     "migrate:exam-type": "node src/database/removeExamType.js",
     "test": "node --test"
   },

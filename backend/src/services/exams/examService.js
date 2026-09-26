@@ -28,17 +28,17 @@ const normalizeAllocation = allocation => ({
   endTime: allocation.endTime ?? allocation.end_time
 })
 
-export const createExam = async ({
-  academicYearId,
-  semesterId,
-  courseId,
-  examDate,
-  startTime,
-  endTime,
-  durationMinutes,
-  status = 'SCHEDULED',
-  instructions = ''
-}) => {
+export const createExam = async payload => {
+  const academicYearId = payload.academicYearId ?? payload.academic_year_id
+  const semesterId = payload.semesterId ?? payload.semester_id
+  const courseId = payload.courseId ?? payload.course_id
+  const examDate = payload.examDate ?? payload.exam_date
+  const startTime = payload.startTime ?? payload.start_time
+  const endTime = payload.endTime ?? payload.end_time
+  const durationMinutes = payload.durationMinutes ?? payload.duration_minutes
+  const statusValue = payload.status ?? 'SCHEDULED'
+  const instructionsValue = payload.instructions ?? ''
+
   if (
     !academicYearId ||
     !semesterId ||
@@ -56,6 +56,143 @@ export const createExam = async ({
     }
   }
 
+  const today = new Date().toISOString().slice(0, 10)
+  if (String(examDate).slice(0, 10) < today) {
+    return {
+      valid: false,
+      conflicts: [
+        {
+          type: 'VALIDATION_ERROR',
+          message: 'Exam date cannot be in the past.'
+        }
+      ]
+    }
+  }
+
+  if (String(examDate).slice(0, 10) === today) {
+    const currentTime = new Date().toTimeString().slice(0, 5)
+    if (String(startTime).slice(0, 5) <= currentTime) {
+      return {
+        valid: false,
+        conflicts: [
+          {
+            type: 'VALIDATION_ERROR',
+            message: 'Exam start time must be later than the current time.'
+          }
+        ]
+      }
+    }
+  }
+
+  const existingUnitExam = await query(
+    `SELECT e.start_time, e.end_time, u.code, u.name
+     FROM exams e
+     LEFT JOIN units u ON u.id = e.course_id
+     WHERE e.course_id = ?
+       AND e.exam_date = ?
+       AND e.start_time < ?
+       AND e.end_time > ?
+     LIMIT 1`,
+    [courseId, examDate, endTime, startTime]
+  )
+  if (existingUnitExam[0]) {
+    const unitLabel = existingUnitExam[0].code
+      ? `${existingUnitExam[0].code} - ${existingUnitExam[0].name}`
+      : `Unit ${courseId}`
+    return {
+      valid: false,
+      conflicts: [
+        {
+          type: 'EXAM_UNIT_CONFLICT',
+          message: `${unitLabel} already has an overlapping exam from ${existingUnitExam[0].start_time} to ${existingUnitExam[0].end_time}.`
+        }
+      ]
+    }
+  }
+
+  const cohortAllocations = Array.isArray(payload.cohort_allocations)
+    ? payload.cohort_allocations
+    : []
+  for (const allocation of cohortAllocations) {
+    const cohortId = Number(allocation.cohortId ?? allocation.cohort_id)
+    if (!cohortId) continue
+    const cohort = await findById('cohorts', cohortId)
+    const existing = await query(
+      `SELECT e.start_time, e.end_time
+       FROM exam_cohorts ec
+       JOIN exams e ON e.id = ec.exam_id
+       WHERE ec.cohort_id = ?
+         AND e.exam_date = ?
+         AND e.start_time < ?
+         AND e.end_time > ?
+       LIMIT 1`,
+      [cohortId, examDate, endTime, startTime]
+    )
+    if (existing[0]) {
+      return {
+        valid: false,
+        conflicts: [
+          {
+            type: 'EXAM_COHORT_CONFLICT',
+            message: `${
+              cohort?.name || `Cohort ${cohortId}`
+            } already has an exam scheduled from ${existing[0].start_time} to ${
+              existing[0].end_time
+            }.`
+          }
+        ]
+      }
+    }
+  }
+
+  const venueAllocations = Array.isArray(payload.venue_allocations)
+    ? payload.venue_allocations
+    : []
+  for (const allocation of venueAllocations) {
+    const venueId = Number(allocation.venueId ?? allocation.venue_id)
+    const venue = await findById('venues', venueId)
+    const allocatedCapacity = Number(
+      allocation.allocatedCapacity ?? allocation.allocated_capacity
+    )
+    if (venue && allocatedCapacity > Number(venue.capacity)) {
+      return {
+        valid: false,
+        conflicts: [
+          {
+            type: 'VENUE_CAPACITY_EXCEEDED',
+            message: `${venue.name} cannot allocate more than ${venue.capacity} students.`
+          }
+        ]
+      }
+    }
+    const existing = await query(
+      `SELECT e.start_time, e.end_time
+       FROM exam_venue_allocations eva
+       JOIN exams e ON e.id = eva.exam_id
+       WHERE eva.venue_id = ?
+         AND e.exam_date = ?
+         AND e.start_time < ?
+         AND e.end_time > ?
+       LIMIT 1`,
+      [venueId, examDate, endTime, startTime]
+    )
+    if (existing[0]) {
+      return {
+        valid: false,
+        conflicts: [
+          {
+            type: 'EXAM_VENUE_CONFLICT',
+            message: `${
+              venue?.name || `Venue ${venueId}`
+            } is already booked for an exam from ${existing[0].start_time} to ${
+              existing[0].end_time
+            }.`
+          }
+        ]
+      }
+    }
+  }
+
   const exam = await createRow('exams', {
     academic_year_id: Number(academicYearId),
     semester_id: Number(semesterId),
@@ -64,8 +201,8 @@ export const createExam = async ({
     start_time: startTime,
     end_time: endTime,
     duration_minutes: Number(durationMinutes),
-    status,
-    instructions,
+    status: statusValue,
+    instructions: instructionsValue,
     created_by: 1,
     updated_by: 1
   })
@@ -90,6 +227,43 @@ export const createExamCohortAllocation = async ({
           message: 'Exam cohort allocation requires exam, cohort, and count.'
         }
       ]
+    }
+  }
+
+  const exam = (
+    await query(
+      'SELECT exam_date, start_time, end_time FROM exams WHERE id = ?',
+      [examId]
+    )
+  )[0]
+  const cohort = await findById('cohorts', cohortId)
+  if (exam) {
+    const existing = await query(
+      `SELECT ec.id, e.start_time, e.end_time
+       FROM exam_cohorts ec
+       JOIN exams e ON e.id = ec.exam_id
+       WHERE ec.cohort_id = ?
+         AND ec.exam_id <> ?
+         AND e.exam_date = ?
+         AND e.start_time < ?
+         AND e.end_time > ?
+       LIMIT 1`,
+      [cohortId, examId, exam.exam_date, exam.end_time, exam.start_time]
+    )
+    if (existing[0]) {
+      return {
+        valid: false,
+        conflicts: [
+          {
+            type: 'EXAM_COHORT_CONFLICT',
+            message: `${
+              cohort?.name || `Cohort ${cohortId}`
+            } already has an exam scheduled from ${existing[0].start_time} to ${
+              existing[0].end_time
+            }.`
+          }
+        ]
+      }
     }
   }
 
@@ -118,7 +292,8 @@ export const allocateExamVenue = async ({
   examDate,
   startTime,
   endTime,
-  examAllocations = []
+  examAllocations = [],
+  allowCapacityOverride = false
 }) => {
   if (!examId || !venueId || !allocatedCapacity || !studentCount) {
     return {
@@ -142,7 +317,10 @@ export const allocateExamVenue = async ({
     }
   }
 
-  if (Number(allocatedCapacity) > Number(venue.capacity)) {
+  if (
+    !allowCapacityOverride &&
+    Number(allocatedCapacity) > Number(venue.capacity)
+  ) {
     return {
       valid: false,
       conflicts: [
@@ -154,7 +332,10 @@ export const allocateExamVenue = async ({
     }
   }
 
-  if (Number(studentCount) > Number(allocatedCapacity)) {
+  if (
+    !allowCapacityOverride &&
+    Number(studentCount) > Number(allocatedCapacity)
+  ) {
     return {
       valid: false,
       conflicts: [
@@ -181,7 +362,11 @@ export const allocateExamVenue = async ({
     endTime: endTime ?? fallback?.endTime
   })
 
-  const existingRows = await listRows('exam_venue_allocations')
+  const existingRows = await query(`
+    SELECT eva.*, e.exam_date, e.start_time, e.end_time
+    FROM exam_venue_allocations eva
+    JOIN exams e ON e.id = eva.exam_id
+  `)
   const existingAllocations = [
     ...existingRows.map(item => normalizeAllocation(item)),
     ...examAllocations.map(item => normalizeAllocation(item))
@@ -203,12 +388,17 @@ export const allocateExamVenue = async ({
   })
 
   if (overlap) {
+    const conflictingVenue = await findById('venues', candidate.venueId)
     return {
       valid: false,
       conflicts: [
         {
           type: 'EXAM_VENUE_CONFLICT',
-          message: 'Venue is already allocated to an overlapping exam.'
+          message: `${
+            conflictingVenue?.name || `Venue ${candidate.venueId}`
+          } is already allocated to an overlapping exam from ${
+            candidate.startTime
+          } to ${candidate.endTime}.`
         }
       ]
     }
@@ -218,10 +408,7 @@ export const allocateExamVenue = async ({
     exam_id: Number(examId),
     venue_id: Number(venueId),
     allocated_capacity: Number(allocatedCapacity),
-    student_count: Number(studentCount),
-    exam_date: candidate.examDate,
-    start_time: candidate.startTime,
-    end_time: candidate.endTime
+    student_count: Number(studentCount)
   })
 
   return {
@@ -232,9 +419,9 @@ export const allocateExamVenue = async ({
       venueId: Number(saved.venue_id),
       allocatedCapacity: Number(saved.allocated_capacity),
       studentCount: Number(saved.student_count),
-      examDate: saved.exam_date,
-      startTime: saved.start_time,
-      endTime: saved.end_time
+      examDate: candidate.examDate,
+      startTime: candidate.startTime,
+      endTime: candidate.endTime
     }
   }
 }

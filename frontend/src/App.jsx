@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -19,11 +20,18 @@ import StudentsPage from './pages/StudentsPage'
 import LecturersPage from './pages/LecturersPage'
 import AcademicSetupPage from './pages/AcademicSetupPage'
 import ReportsPage from './pages/ReportsPage'
+import { api } from './api/client'
 import './App.css'
+import ProfileCompletionModal from './components/ProfileCompletionModal'
 
 function ProtectedLayout () {
   const { user, logout } = useAuth()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const { data: profileStatus } = useQuery({
+    queryKey: ['profile-status', user?.id],
+    queryFn: async () => (await api.get('/api/auth/profile-status')).data,
+    enabled: Boolean(user?.id)
+  })
 
   const handleToggleSidebar = () => {
     setSidebarCollapsed(value => !value)
@@ -82,6 +90,9 @@ function ProtectedLayout () {
           <Route path='*' element={<Navigate to='/dashboard' replace />} />
         </Routes>
       </main>
+      {profileStatus && !profileStatus.complete && (
+        <ProfileCompletionModal role={profileStatus.role} />
+      )}
     </div>
   )
 }

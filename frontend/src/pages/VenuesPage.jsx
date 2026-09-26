@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { formatDateOnly } from '../utils/dateOnly'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -26,6 +27,13 @@ export default function VenuesPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyVenue)
   const [formError, setFormError] = useState('')
+  const [allocationVenue, setAllocationVenue] = useState(null)
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
 
   const {
     data = [],
@@ -46,6 +54,39 @@ export default function VenuesPage () {
       return toArray(response)
     }
   })
+
+  const { data: exams = [] } = useQuery({
+    queryKey: ['venue-exam-allocations'],
+    queryFn: async () => toArray(await api.get('/api/exams'))
+  })
+
+  const { data: timetable = [] } = useQuery({
+    queryKey: ['venue-timetable-allocations'],
+    queryFn: async () => toArray(await api.get('/api/timetable'))
+  })
+
+  const { data: units = [] } = useQuery({
+    queryKey: ['venue-allocation-units'],
+    queryFn: async () => toArray(await api.get('/api/academic/courses'))
+  })
+
+  const { data: lecturers = [] } = useQuery({
+    queryKey: ['venue-allocation-lecturers'],
+    queryFn: async () => toArray(await api.get('/api/academic/lecturers'))
+  })
+
+  const { data: cohorts = [] } = useQuery({
+    queryKey: ['venue-allocation-cohorts'],
+    queryFn: async () => toArray(await api.get('/api/academic/cohorts'))
+  })
+
+  const unitMap = Object.fromEntries(units.map(unit => [String(unit.id), unit]))
+  const lecturerMap = Object.fromEntries(
+    lecturers.map(lecturer => [String(lecturer.id), lecturer])
+  )
+  const cohortMap = Object.fromEntries(
+    cohorts.map(cohort => [String(cohort.id), cohort])
+  )
 
   const venueTypeMap = Object.fromEntries(
     (venueTypes || []).map(type => [String(type.id), type.name])
@@ -337,8 +378,12 @@ export default function VenuesPage () {
                     </div>
 
                     <div className='venue-actions'>
-                      <button type='button' className='secondary-button'>
-                        View
+                      <button
+                        type='button'
+                        className='secondary-button'
+                        onClick={() => setAllocationVenue(item)}
+                      >
+                        View allocations
                       </button>
                       <button
                         type='button'
@@ -361,6 +406,170 @@ export default function VenuesPage () {
           </div>
         )}
       </section>
+
+      {allocationVenue && (
+        <div
+          className='profile-modal-backdrop'
+          onClick={() => setAllocationVenue(null)}
+        >
+          <section
+            className='profile-modal content-panel venue-allocation-modal'
+            onClick={event => event.stopPropagation()}
+          >
+            <div className='page-header'>
+              <div>
+                <p className='eyebrow'>Venue allocations</p>
+                <h2>{allocationVenue.name || allocationVenue.venue_name}</h2>
+              </div>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setAllocationVenue(null)}
+              >
+                Close
+              </button>
+            </div>
+            <p>Capacity: {allocationVenue.capacity || 0} seats</p>
+            <div className='venue-allocation-grid'>
+              {[
+                ...exams.flatMap(exam =>
+                  (exam.venueDetails || [])
+                    .filter(
+                      allocation =>
+                        String(allocation.id) === String(allocationVenue.id)
+                    )
+                    .map(allocation => ({ type: 'EXAM', exam, allocation }))
+                ),
+                ...timetable
+                  .filter(
+                    entry =>
+                      String(entry.venue_id ?? entry.venueId) ===
+                      String(allocationVenue.id)
+                  )
+                  .map(entry => ({
+                    type: entry.event_type || entry.eventType || 'LECTURE',
+                    entry
+                  }))
+              ].length ? (
+                [
+                  ...exams.flatMap(exam =>
+                    (exam.venueDetails || [])
+                      .filter(
+                        allocation =>
+                          String(allocation.id) === String(allocationVenue.id)
+                      )
+                      .map(allocation => ({ type: 'EXAM', exam, allocation }))
+                  ),
+                  ...timetable
+                    .filter(
+                      entry =>
+                        String(entry.venue_id ?? entry.venueId) ===
+                        String(allocationVenue.id)
+                    )
+                    .map(entry => ({
+                      type: entry.event_type || entry.eventType || 'LECTURE',
+                      entry
+                    }))
+                ].map(item =>
+                  item.type === 'EXAM' ? (
+                    <article
+                      key={`exam-${item.exam.id}-${item.allocation.id}`}
+                      className='venue-allocation-card'
+                    >
+                      <strong>
+                        EXAM ·{' '}
+                        {item.exam.unitCode || item.exam.unit_code || 'Unit'} -{' '}
+                        {item.exam.unitName || item.exam.unit_name || ''}
+                      </strong>
+                      <span>
+                        {item.exam.exam_date
+                          ? formatDateOnly(item.exam.exam_date, {
+                              weekday: 'short',
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })
+                          : 'Date unavailable'}
+                      </span>
+                      <span>
+                        {item.exam.start_time} - {item.exam.end_time}
+                      </span>
+                      <span>
+                        {(item.exam.cohortDetails || [])
+                          .map(cohort => cohort.name)
+                          .join(', ') || 'No cohort details'}
+                      </span>
+                      <span>
+                        {item.allocation.capacity} students allocated of{' '}
+                        {item.allocation.venueCapacity ||
+                          allocationVenue.capacity ||
+                          0}{' '}
+                        seats
+                      </span>
+                      <small>{item.exam.status || 'SCHEDULED'}</small>
+                    </article>
+                  ) : (
+                    <article
+                      key={`event-${item.entry.id}`}
+                      className='venue-allocation-card'
+                    >
+                      <strong>
+                        {String(item.type).toUpperCase()} ·{' '}
+                        {unitMap[
+                          String(item.entry.course_id ?? item.entry.courseId)
+                        ]?.code || 'Unit'}{' '}
+                        -{' '}
+                        {unitMap[
+                          String(item.entry.course_id ?? item.entry.courseId)
+                        ]?.name || 'Unknown unit'}
+                      </strong>
+                      <span>
+                        {item.entry.day_of_week ||
+                          item.entry.dayOfWeek ||
+                          'Day unavailable'}
+                      </span>
+                      <span>
+                        {item.entry.start_time || item.entry.startTime} -{' '}
+                        {item.entry.end_time || item.entry.endTime}
+                      </span>
+                      <span>
+                        Lecturer:{' '}
+                        {lecturerMap[
+                          String(
+                            item.entry.lecturer_id ?? item.entry.lecturerId
+                          )
+                        ]?.name ||
+                          lecturerMap[
+                            String(
+                              item.entry.lecturer_id ?? item.entry.lecturerId
+                            )
+                          ]?.email ||
+                          'N/A'}
+                      </span>
+                      <span>
+                        Cohorts:{' '}
+                        {(item.entry.cohortIds || [item.entry.cohort_id])
+                          .map(id => cohortMap[String(id)])
+                          .filter(Boolean)
+                          .map(
+                            cohort =>
+                              `${cohort.name} (${
+                                cohort.student_count ?? cohort.studentCount ?? 0
+                              } students)`
+                          )
+                          .join(', ') || 'N/A'}
+                      </span>
+                      <span>{item.entry.status || 'SCHEDULED'}</span>
+                    </article>
+                  )
+                )
+              ) : (
+                <p>No allocations found for this venue.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

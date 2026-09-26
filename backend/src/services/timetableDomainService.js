@@ -2,12 +2,35 @@ import {
   createRow,
   findById,
   listRows,
+  query,
   rawQuery,
   updateRow
 } from '../repositories/sqlRepository.js'
 import { validateTimetableEntry } from './scheduling/conflictService.js'
 
-export const listTimetableEntries = async () => listRows('timetable_entries')
+export const listTimetableEntries = async () =>
+  (
+    await rawQuery(`
+    SELECT te.*,
+      GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids,
+      GROUP_CONCAT(DISTINCT tep.programme_id) AS programme_ids
+    FROM timetable_entries te
+    LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+    LEFT JOIN timetable_entry_programmes tep ON tep.timetable_entry_id = te.id
+    GROUP BY te.id
+    ORDER BY te.id
+  `)
+  ).map(row => ({
+    ...row,
+    cohortIds: row.cohort_ids
+      ? String(row.cohort_ids).split(',').map(Number)
+      : row.cohort_id
+      ? [Number(row.cohort_id)]
+      : [],
+    programmeIds: row.programme_ids
+      ? String(row.programme_ids).split(',').map(Number)
+      : []
+  }))
 export const getTimetableEntry = async id => findById('timetable_entries', id)
 
 export const createTimetableEntry = async payload => {
@@ -22,6 +45,21 @@ export const createTimetableEntry = async payload => {
   const venue = (await listRows('venues')).find(
     item => Number(item.id) === Number(payload.venue_id)
   )
+  const lecturer = await findById('lecturers', payload.lecturer_id)
+  const lecturerUser = lecturer?.user_id
+    ? (
+        await query(
+          'SELECT first_name, last_name, email FROM users WHERE id = ?',
+          [lecturer.user_id]
+        )
+      )[0]
+    : null
+  const lecturerName = lecturerUser
+    ? `${lecturerUser.first_name || ''} ${
+        lecturerUser.last_name || ''
+      }`.trim() || lecturerUser.email
+    : null
+  const cohort = await findById('cohorts', payload.cohort_id)
   const expectedStudents = Number(
     payload.expected_students ?? payload.expectedStudents ?? 0
   )
@@ -33,9 +71,15 @@ export const createTimetableEntry = async payload => {
 
   const validation = validateTimetableEntry({
     venueId: payload.venue_id,
+    venueName: venue?.name,
     lecturerId: payload.lecturer_id,
+    lecturerName,
     cohortId: payload.cohort_id,
-    expectedStudents,
+    cohortName: cohort?.name,
+    dayOfWeek: payload.day_of_week ?? payload.dayOfWeek,
+    expectedStudents: payload.allow_capacity_override
+      ? undefined
+      : expectedStudents,
     venueCapacity,
     startTime: payload.start_time,
     endTime: payload.end_time,

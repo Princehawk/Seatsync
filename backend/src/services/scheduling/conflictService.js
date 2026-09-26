@@ -9,25 +9,44 @@ const toMinutes = time => {
   return hours * 60 + minutes
 }
 
+const field = (record, camelCase, snakeCase) =>
+  record?.[camelCase] ?? record?.[snakeCase]
+
+const isSameDay = (dayOfWeek, event) => {
+  const eventDay = field(event, 'dayOfWeek', 'day_of_week')
+  return (
+    !dayOfWeek ||
+    !eventDay ||
+    String(dayOfWeek).toUpperCase() === String(eventDay).toUpperCase()
+  )
+}
+
 export const checkVenueConflict = ({
   venueId,
+  venueName,
+  dayOfWeek,
   startTime,
   endTime,
   existingEvents = []
 }) => {
   const conflicts = []
   for (const event of existingEvents) {
-    if (event.venueId !== venueId) continue
+    if (field(event, 'venueId', 'venue_id') !== venueId) continue
+    if (!isSameDay(dayOfWeek, event)) continue
     const overlapsEvent = overlaps(
       toMinutes(startTime),
       toMinutes(endTime),
-      toMinutes(event.startTime),
-      toMinutes(event.endTime)
+      toMinutes(field(event, 'startTime', 'start_time')),
+      toMinutes(field(event, 'endTime', 'end_time'))
     )
     if (overlapsEvent) {
       conflicts.push({
         type: 'VENUE_CONFLICT',
-        message: `Venue ${venueId} is occupied from ${event.startTime} to ${event.endTime}.`,
+        message: `${venueName || `Venue ${venueId}`} is occupied from ${field(
+          event,
+          'startTime',
+          'start_time'
+        )} to ${field(event, 'endTime', 'end_time')}.`,
         conflictingEventId: event.id
       })
     }
@@ -38,23 +57,32 @@ export const checkVenueConflict = ({
 
 export const checkLecturerConflict = ({
   lecturerId,
+  lecturerName,
+  dayOfWeek,
   startTime,
   endTime,
   existingEvents = []
 }) => {
   const conflicts = []
   for (const event of existingEvents) {
-    if (event.lecturerId !== lecturerId) continue
+    if (field(event, 'lecturerId', 'lecturer_id') !== lecturerId) continue
+    if (!isSameDay(dayOfWeek, event)) continue
     const overlapsEvent = overlaps(
       toMinutes(startTime),
       toMinutes(endTime),
-      toMinutes(event.startTime),
-      toMinutes(event.endTime)
+      toMinutes(field(event, 'startTime', 'start_time')),
+      toMinutes(field(event, 'endTime', 'end_time'))
     )
     if (overlapsEvent) {
       conflicts.push({
         type: 'LECTURER_CONFLICT',
-        message: `Lecturer ${lecturerId} is already assigned during ${event.startTime}-${event.endTime}.`,
+        message: `${
+          lecturerName || `Lecturer ${lecturerId}`
+        } is already assigned during ${field(
+          event,
+          'startTime',
+          'start_time'
+        )}-${field(event, 'endTime', 'end_time')}.`,
         conflictingEventId: event.id
       })
     }
@@ -65,23 +93,32 @@ export const checkLecturerConflict = ({
 
 export const checkCohortConflict = ({
   cohortId,
+  cohortName,
+  dayOfWeek,
   startTime,
   endTime,
   existingEvents = []
 }) => {
   const conflicts = []
   for (const event of existingEvents) {
-    if (event.cohortId !== cohortId) continue
+    if (field(event, 'cohortId', 'cohort_id') !== cohortId) continue
+    if (!isSameDay(dayOfWeek, event)) continue
     const overlapsEvent = overlaps(
       toMinutes(startTime),
       toMinutes(endTime),
-      toMinutes(event.startTime),
-      toMinutes(event.endTime)
+      toMinutes(field(event, 'startTime', 'start_time')),
+      toMinutes(field(event, 'endTime', 'end_time'))
     )
     if (overlapsEvent) {
       conflicts.push({
         type: 'COHORT_CONFLICT',
-        message: `Cohort ${cohortId} is already scheduled from ${event.startTime} to ${event.endTime}.`,
+        message: `${
+          cohortName || `Cohort ${cohortId}`
+        } is already scheduled from ${field(
+          event,
+          'startTime',
+          'start_time'
+        )} to ${field(event, 'endTime', 'end_time')}.`,
         conflictingEventId: event.id
       })
     }
@@ -111,22 +148,28 @@ export const checkVenueCapacity = ({ expectedStudents, venueCapacity }) => {
 }
 
 export const checkVenueBlockConflict = ({
+  dayOfWeek,
   startTime,
   endTime,
   venueBlocks = []
 }) => {
   const conflicts = []
   for (const block of venueBlocks) {
+    if (!isSameDay(dayOfWeek, block)) continue
     const overlapsBlock = overlaps(
       toMinutes(startTime),
       toMinutes(endTime),
-      toMinutes(block.startTime),
-      toMinutes(block.endTime)
+      toMinutes(field(block, 'startTime', 'start_time')),
+      toMinutes(field(block, 'endTime', 'end_time'))
     )
     if (overlapsBlock) {
       conflicts.push({
         type: 'VENUE_BLOCK_CONFLICT',
-        message: `Venue is blocked from ${block.startTime} to ${block.endTime}.`,
+        message: `Venue is blocked from ${field(
+          block,
+          'startTime',
+          'start_time'
+        )} to ${field(block, 'endTime', 'end_time')}.`,
         conflictingEventId: block.id
       })
     }
@@ -139,6 +182,7 @@ export const validateTimetableEntry = ({
   venueId,
   lecturerId,
   cohortId,
+  dayOfWeek,
   expectedStudents,
   venueCapacity,
   startTime,
@@ -147,11 +191,29 @@ export const validateTimetableEntry = ({
   venueBlocks = []
 }) => {
   const results = [
-    checkVenueConflict({ venueId, startTime, endTime, existingEvents }),
-    checkLecturerConflict({ lecturerId, startTime, endTime, existingEvents }),
-    checkCohortConflict({ cohortId, startTime, endTime, existingEvents }),
+    checkVenueConflict({
+      venueId,
+      dayOfWeek,
+      startTime,
+      endTime,
+      existingEvents
+    }),
+    checkLecturerConflict({
+      lecturerId,
+      dayOfWeek,
+      startTime,
+      endTime,
+      existingEvents
+    }),
+    checkCohortConflict({
+      cohortId,
+      dayOfWeek,
+      startTime,
+      endTime,
+      existingEvents
+    }),
     checkVenueCapacity({ expectedStudents, venueCapacity }),
-    checkVenueBlockConflict({ startTime, endTime, venueBlocks })
+    checkVenueBlockConflict({ dayOfWeek, startTime, endTime, venueBlocks })
   ]
 
   const conflicts = results.flatMap(result => result.conflicts)

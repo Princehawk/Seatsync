@@ -1,11 +1,28 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { formatDateOnly, weekdayFromDateOnly } from '../utils/dateOnly'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
   if (Array.isArray(value?.data)) return value.data
   return []
+}
+
+const todayInputDate = () => {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+}
+
+const formatExamDate = value => {
+  if (!value) return 'TBA'
+  return formatDateOnly(value)
+}
+
+const examDay = value => {
+  if (!value) return 'TBA'
+  return weekdayFromDateOnly(value)
 }
 
 const emptyExam = {
@@ -29,6 +46,15 @@ export default function ExamsPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyExam)
   const [formError, setFormError] = useState('')
+  const [capacityWarning, setCapacityWarning] = useState(null)
+  const [sortBy, setSortBy] = useState('date')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
 
   const {
     data = [],
@@ -150,6 +176,7 @@ export default function ExamsPage () {
           venueId: Number(allocation.venueId),
           allocatedCapacity: Number(allocation.allocatedCapacity),
           studentCount: Number(allocation.studentCount),
+          allowCapacityOverride: Boolean(payload.allow_capacity_override),
           examDate: payload.exam_date,
           startTime: payload.start_time,
           endTime: payload.end_time
@@ -168,13 +195,35 @@ export default function ExamsPage () {
   })
 
   const filteredRows = useMemo(() => {
-    return (data || []).filter(item => {
-      const text = `${item.course_id || item.courseId || ''} ${
-        item.venue_id || item.venueId || ''
-      }`.toLowerCase()
-      return text.includes(search.toLowerCase())
-    })
-  }, [data, search])
+    return [...(data || [])]
+      .filter(item => {
+        const text = `${item.course_id || item.courseId || ''} ${
+          item.venue_id || item.venueId || ''
+        }`.toLowerCase()
+        const status = item.status || 'SCHEDULED'
+        return (
+          text.includes(search.toLowerCase()) &&
+          (statusFilter === 'all' || status === statusFilter)
+        )
+      })
+      .sort((first, second) => {
+        if (sortBy === 'time')
+          return String(first.start_time || '').localeCompare(
+            String(second.start_time || '')
+          )
+        if (sortBy === 'unit')
+          return String(first.unitCode || first.unit_code || '').localeCompare(
+            String(second.unitCode || second.unit_code || '')
+          )
+        if (sortBy === 'status')
+          return String(first.status || '').localeCompare(
+            String(second.status || '')
+          )
+        return String(first.exam_date || '').localeCompare(
+          String(second.exam_date || '')
+        )
+      })
+  }, [data, search, sortBy, statusFilter])
 
   const handleSubmit = event => {
     event.preventDefault()
@@ -192,12 +241,37 @@ export default function ExamsPage () {
       return
     }
 
-    const cohortAllocations = Object.entries(form.cohort_allocations)
-      .map(([cohortId, studentCount]) => ({ cohortId, studentCount }))
-      .filter(allocation => Number(allocation.studentCount) > 0)
+    const today = todayInputDate()
+    if (form.exam_date < today) {
+      setFormError('Exam date cannot be in the past.')
+      return
+    }
+
+    if (form.exam_date === today) {
+      const currentTime = new Date().toTimeString().slice(0, 5)
+      if (form.start_time <= currentTime) {
+        setFormError('Exam start time must be later than the current time.')
+        return
+      }
+    }
+
+    const cohortAllocations = Object.keys(form.cohort_allocations)
+      .map(cohortId => {
+        const cohort = cohorts.find(
+          item => String(item.id) === String(cohortId)
+        )
+        return {
+          cohortId,
+          studentCount: Number(
+            cohort?.student_count ?? cohort?.studentCount ?? 0
+          ),
+          cohortName: cohort?.name || `Cohort ${cohortId}`
+        }
+      })
+      .filter(allocation => allocation.studentCount > 0)
 
     if (!cohortAllocations.length) {
-      setFormError('Select at least one cohort and enter its student count.')
+      setFormError('Select at least one cohort with students.')
       return
     }
 
@@ -220,40 +294,30 @@ export default function ExamsPage () {
       return
     }
 
-    const invalidVenue = venueAllocations.find(allocation => {
+    const allocatedStudents = venueAllocations.reduce(
+      (total, allocation) => total + allocation.studentCount,
+      0
+    )
+
+    const overCapacityVenue = venueAllocations.find(allocation => {
       const venue = venues.find(
         item => String(item.id) === String(allocation.venueId)
       )
-      return (
-        !venue || allocation.allocatedCapacity > Number(venue.capacity || 0)
-      )
+      return allocation.allocatedCapacity > Number(venue?.capacity || 0)
     })
-
-    if (invalidVenue) {
+    if (overCapacityVenue) {
       const venue = venues.find(
-        item => String(item.id) === String(invalidVenue.venueId)
+        item => String(item.id) === String(overCapacityVenue.venueId)
       )
       setFormError(
-        `${venue?.name || 'Selected venue'} cannot hold more than ${
+        `${venue?.name || 'Selected venue'} cannot be allocated more than ${
           venue?.capacity || 0
         } students.`
       )
       return
     }
 
-    const allocatedStudents = venueAllocations.reduce(
-      (total, allocation) => total + allocation.studentCount,
-      0
-    )
-
-    if (allocatedStudents !== totalStudents) {
-      setFormError(
-        `Venue allocations must total exactly ${totalStudents} students. Currently allocated: ${allocatedStudents}.`
-      )
-      return
-    }
-
-    createExamMutation.mutate({
+    const payload = {
       academic_year_id: Number(form.academic_year_id),
       semester_id: Number(form.semester_id),
       course_id: Number(form.course_id),
@@ -264,7 +328,9 @@ export default function ExamsPage () {
       instructions: form.instructions,
       cohort_allocations: cohortAllocations,
       venue_allocations: venueAllocations
-    })
+    }
+
+    createExamMutation.mutate(payload)
   }
 
   return (
@@ -467,6 +533,7 @@ export default function ExamsPage () {
                 <input
                   type='date'
                   value={form.exam_date}
+                  min={todayInputDate()}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -481,6 +548,11 @@ export default function ExamsPage () {
                 <input
                   type='time'
                   value={form.start_time}
+                  min={
+                    form.exam_date === todayInputDate()
+                      ? new Date().toTimeString().slice(0, 5)
+                      : undefined
+                  }
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -641,25 +713,12 @@ export default function ExamsPage () {
                               })
                             }
                           />
-                          <span>{cohort.name}</span>
+                          <span>
+                            {cohort.name} (
+                            {cohort.student_count ?? cohort.studentCount ?? 0}{' '}
+                            students)
+                          </span>
                         </label>
-                        {selected && (
-                          <input
-                            type='number'
-                            min='1'
-                            placeholder='Students'
-                            value={form.cohort_allocations[cohortId]}
-                            onChange={event =>
-                              setForm(current => ({
-                                ...current,
-                                cohort_allocations: {
-                                  ...current.cohort_allocations,
-                                  [cohortId]: event.target.value
-                                }
-                              }))
-                            }
-                          />
-                        )}
                       </div>
                     )
                   })}
@@ -717,6 +776,24 @@ export default function ExamsPage () {
             onChange={event => setSearch(event.target.value)}
             placeholder='Search exam or unit'
           />
+          <select
+            value={statusFilter}
+            onChange={event => setStatusFilter(event.target.value)}
+          >
+            <option value='all'>All statuses</option>
+            <option value='SCHEDULED'>Scheduled</option>
+            <option value='CANCELLED'>Cancelled</option>
+            <option value='COMPLETED'>Completed</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={event => setSortBy(event.target.value)}
+          >
+            <option value='date'>Sort by date</option>
+            <option value='time'>Sort by time</option>
+            <option value='unit'>Sort by unit</option>
+            <option value='status'>Sort by status</option>
+          </select>
         </div>
       </section>
 
@@ -726,26 +803,113 @@ export default function ExamsPage () {
         ) : error ? (
           <p className='form-error'>Unable to load exams.</p>
         ) : (
-          <ul className='simple-list'>
-            {filteredRows.length ? (
-              filteredRows.map(item => (
-                <li key={item.id ?? `${item.exam_date}-${item.course_id}`}>
-                  <span>Exam</span>
-                  <strong>
-                    {item.course_id || item.courseId || 'Unit'} ·{' '}
-                    {item.exam_date || item.examDate || 'TBA'}
-                  </strong>
-                </li>
-              ))
-            ) : (
-              <li>
-                <span>No exams found</span>
-                <strong>--</strong>
-              </li>
-            )}
-          </ul>
+          <div className='table-panel exam-table-scroll'>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Day</th>
+                  <th>Unit</th>
+                  <th>Cohorts</th>
+                  <th>Programmes</th>
+                  <th>Status</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Duration</th>
+                  <th>Venues</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.length ? (
+                  filteredRows.map(item => (
+                    <tr key={item.id ?? `${item.exam_date}-${item.course_id}`}>
+                      <td>{formatExamDate(item.exam_date)}</td>
+                      <td>{examDay(item.exam_date)}</td>
+                      <td>
+                        {item.unitCode ||
+                          item.unit_code ||
+                          item.course_id ||
+                          'Unit'}{' '}
+                        - {item.unitName || item.unit_name || ''}
+                      </td>
+                      <td>
+                        {(item.cohortDetails || [])
+                          .map(
+                            cohort => `${cohort.name} (${cohort.studentCount})`
+                          )
+                          .join(', ') || 'N/A'}
+                      </td>
+                      <td>{item.programmes || 'All assigned'}</td>
+                      <td>{item.status || 'SCHEDULED'}</td>
+                      <td>{item.start_time || 'TBA'}</td>
+                      <td>{item.end_time || 'TBA'}</td>
+                      <td>
+                        {item.duration_minutes
+                          ? `${item.duration_minutes} min`
+                          : 'N/A'}
+                      </td>
+                      <td>
+                        {(item.venueDetails || [])
+                          .map(venue => `${venue.name} (${venue.capacity})`)
+                          .join(', ') || 'N/A'}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan='10'>No exams found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
+
+      {capacityWarning && (
+        <div className='profile-modal-backdrop'>
+          <section className='profile-modal content-panel capacity-warning-modal'>
+            <p className='eyebrow'>Capacity warning</p>
+            <h2>Review exam allocation</h2>
+            <p>
+              Selected cohorts contain {capacityWarning.totalStudents} students,
+              while venues are allocated for {capacityWarning.allocatedStudents}
+              .
+            </p>
+            {capacityWarning.venueName && (
+              <p>
+                {capacityWarning.venueName} has capacity for{' '}
+                {capacityWarning.venueCapacity}, but{' '}
+                {capacityWarning.venueAllocation} has been allocated.
+              </p>
+            )}
+            <p>You can continue anyway or return and adjust the allocations.</p>
+            <div className='toolbar-actions'>
+              <button
+                type='button'
+                className='primary-button'
+                onClick={() => {
+                  createExamMutation.mutate({
+                    ...capacityWarning.payload,
+                    allow_capacity_override: true
+                  })
+                  setCapacityWarning(null)
+                }}
+                disabled={createExamMutation.isPending}
+              >
+                Continue anyway
+              </button>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setCapacityWarning(null)}
+              >
+                Adjust allocations
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

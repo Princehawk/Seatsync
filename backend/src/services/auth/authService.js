@@ -164,13 +164,7 @@ export const registerUser = async ({
   email,
   password,
   phoneNumber = null,
-  role = 'STUDENT',
-  facultyIds = [],
-  departmentIds = [],
-  programmeIds = [],
-  programmeId,
-  academicYearId,
-  currentYear = 1
+  role = 'STUDENT'
 }) => {
   if (!firstName || !lastName || !email || !password) {
     throw new Error('First name, last name, email, and password are required.')
@@ -204,71 +198,6 @@ export const registerUser = async ({
     await createRow('user_roles', { user_id: user.id, role_id: roleRow[0].id })
   }
 
-  if (role === 'LECTURER') {
-    const faculties = facultyIds.map(Number).filter(Boolean)
-    const departments = departmentIds.map(Number).filter(Boolean)
-    const programmes = programmeIds.map(Number).filter(Boolean)
-    if (!faculties.length || !departments.length || !programmes.length) {
-      throw new Error(
-        'Lecturers must select at least one faculty, department, and programme.'
-      )
-    }
-
-    const lecturer = await createRow('lecturers', {
-      user_id: user.id,
-      staff_number: `STF-${user.id}`,
-      department_id: departments[0],
-      employment_status: 'ACTIVE'
-    })
-    for (const facultyId of faculties)
-      await rawQuery(
-        'INSERT INTO lecturer_faculties (lecturer_id, faculty_id) VALUES (?, ?)',
-        [lecturer.id, facultyId]
-      )
-    for (const departmentId of departments)
-      await rawQuery(
-        'INSERT INTO lecturer_departments (lecturer_id, department_id) VALUES (?, ?)',
-        [lecturer.id, departmentId]
-      )
-    for (const programmeIdValue of programmes)
-      await rawQuery(
-        'INSERT INTO lecturer_programmes (lecturer_id, programme_id) VALUES (?, ?)',
-        [lecturer.id, programmeIdValue]
-      )
-  }
-
-  if (role === 'STUDENT' || role === 'CLASS_REP') {
-    const selectedProgrammeId = Number(programmeId)
-    const selectedAcademicYearId = Number(academicYearId)
-    const selectedYear = Number(currentYear)
-    if (!selectedProgrammeId || !selectedAcademicYearId || !selectedYear) {
-      throw new Error(
-        'Students and class representatives must select an academic year, programme, and current year.'
-      )
-    }
-    const cohortRows = await query(
-      'SELECT id FROM cohorts WHERE programme_id = ? AND academic_year_id = ? AND (year_number = ? OR year_number IS NULL) ORDER BY year_number IS NULL, id LIMIT 1',
-      [selectedProgrammeId, selectedAcademicYearId, selectedYear]
-    )
-    const student = await createRow('students', {
-      user_id: user.id,
-      student_number: `STU-${user.id}`,
-      programme_id: selectedProgrammeId,
-      cohort_id: cohortRows[0]?.id || null,
-      admission_year: new Date().getFullYear(),
-      current_year: selectedYear,
-      status: 'ACTIVE'
-    })
-    if (role === 'CLASS_REP' && student && cohortRows[0]) {
-      await createRow('cohort_representatives', {
-        cohort_id: cohortRows[0].id,
-        student_id: student.id,
-        start_date: new Date().toISOString().slice(0, 10),
-        is_active: true
-      })
-    }
-  }
-
   const roles = await getUserRoles(user.id)
 
   const tokens = issueTokens({ id: user.id, email: user.email, roles })
@@ -285,6 +214,130 @@ export const registerUser = async ({
     },
     ...tokens
   }
+}
+
+export const getProfileStatus = async userId => {
+  const roles = await getUserRoles(userId)
+  const role = roles[0]
+  let complete = false
+  if (role === 'LECTURER') {
+    const rows = await query(
+      `SELECT l.id
+       FROM lecturers l
+       WHERE l.user_id = ?
+         AND EXISTS (SELECT 1 FROM lecturer_faculties WHERE lecturer_id = l.id)
+         AND EXISTS (SELECT 1 FROM lecturer_departments WHERE lecturer_id = l.id)
+         AND EXISTS (SELECT 1 FROM lecturer_programmes WHERE lecturer_id = l.id)
+         AND EXISTS (SELECT 1 FROM lecturer_units WHERE lecturer_id = l.id)`,
+      [userId]
+    )
+    complete = Boolean(rows[0])
+  } else if (role === 'STUDENT' || role === 'CLASS_REP') {
+    const rows = await query(
+      `SELECT id FROM students
+       WHERE user_id = ? AND programme_id IS NOT NULL
+         AND current_year IS NOT NULL`,
+      [userId]
+    )
+    complete = Boolean(rows[0])
+  } else {
+    complete = true
+  }
+  return { complete, role }
+}
+
+export const completeAcademicProfile = async (userId, payload) => {
+  const { role } = await getProfileStatus(userId)
+  if (role === 'LECTURER') {
+    const faculties = (payload.facultyIds || []).map(Number).filter(Boolean)
+    const departments = (payload.departmentIds || [])
+      .map(Number)
+      .filter(Boolean)
+    const programmes = (payload.programmeIds || []).map(Number).filter(Boolean)
+    const units = (payload.unitIds || []).map(Number).filter(Boolean)
+    if (
+      !faculties.length ||
+      !departments.length ||
+      !programmes.length ||
+      !units.length
+    ) {
+      throw new Error(
+        'Select at least one faculty, department, programme, and unit.'
+      )
+    }
+    const existingLecturer = (
+      await query('SELECT id FROM lecturers WHERE user_id = ?', [userId])
+    )[0]
+    const lecturer =
+      existingLecturer ||
+      (await createRow('lecturers', {
+        user_id: userId,
+        staff_number: `STF-${userId}`,
+        department_id: departments[0],
+        employment_status: 'ACTIVE'
+      }))
+    if (existingLecturer) {
+      await rawQuery('DELETE FROM lecturer_faculties WHERE lecturer_id = ?', [
+        lecturer.id
+      ])
+      await rawQuery('DELETE FROM lecturer_departments WHERE lecturer_id = ?', [
+        lecturer.id
+      ])
+      await rawQuery('DELETE FROM lecturer_programmes WHERE lecturer_id = ?', [
+        lecturer.id
+      ])
+      await rawQuery('DELETE FROM lecturer_units WHERE lecturer_id = ?', [
+        lecturer.id
+      ])
+    }
+    for (const id of faculties)
+      await rawQuery('INSERT INTO lecturer_faculties VALUES (?, ?)', [
+        lecturer.id,
+        id
+      ])
+    for (const id of departments)
+      await rawQuery('INSERT INTO lecturer_departments VALUES (?, ?)', [
+        lecturer.id,
+        id
+      ])
+    for (const id of programmes)
+      await rawQuery('INSERT INTO lecturer_programmes VALUES (?, ?)', [
+        lecturer.id,
+        id
+      ])
+    for (const id of units)
+      await rawQuery('INSERT INTO lecturer_units VALUES (?, ?)', [
+        lecturer.id,
+        id
+      ])
+  } else if (role === 'STUDENT' || role === 'CLASS_REP') {
+    const programmeId = Number(payload.programmeId)
+    const academicYearId = Number(payload.academicYearId)
+    const currentYear = Number(payload.currentYear)
+    if (!programmeId || !academicYearId || !currentYear)
+      throw new Error('Select an academic year, current year, and programme.')
+    const [cohort] = await query(
+      'SELECT id FROM cohorts WHERE programme_id = ? AND academic_year_id = ? ORDER BY id LIMIT 1',
+      [programmeId, academicYearId]
+    )
+    const student = await createRow('students', {
+      user_id: userId,
+      student_number: `STU-${userId}`,
+      programme_id: programmeId,
+      cohort_id: cohort?.id || null,
+      admission_year: new Date().getFullYear(),
+      current_year: currentYear,
+      status: 'ACTIVE'
+    })
+    if (role === 'CLASS_REP' && cohort)
+      await createRow('cohort_representatives', {
+        cohort_id: cohort.id,
+        student_id: student.id,
+        start_date: new Date().toISOString().slice(0, 10),
+        is_active: true
+      })
+  }
+  return { complete: true, role }
 }
 
 export const loginUser = async ({ email, password }) => {

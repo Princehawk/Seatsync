@@ -245,7 +245,19 @@ export const updateCohort = async (id, updates) => {
 export const deleteCohort = async id => deleteRow('cohorts', id)
 
 export const listStudents = async () =>
-  (await listRows('students')).map(serialize)
+  (
+    await rawQuery(`
+    SELECT s.*, u.first_name, u.last_name, u.email, u.phone_number
+    FROM students s
+    LEFT JOIN users u ON u.id = s.user_id
+    ORDER BY s.id
+  `)
+  ).map(row => ({
+    ...serialize(row),
+    name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Student',
+    email: row.email,
+    phoneNumber: row.phone_number
+  }))
 export const createStudent = async payload => {
   const row = await createRow('students', payload)
   return row ? serialize(row) : null
@@ -263,25 +275,32 @@ export const deleteStudent = async id => deleteRow('students', id)
 export const listLecturers = async () =>
   (
     await rawQuery(`
-    SELECT l.*, u.first_name, u.last_name, u.email,
+    SELECT l.*, u.first_name, u.last_name, u.email, u.phone_number,
       GROUP_CONCAT(DISTINCT lp.programme_id) AS programme_ids,
-      GROUP_CONCAT(DISTINCT ld.department_id) AS department_ids
+        GROUP_CONCAT(DISTINCT ld.department_id) AS department_ids,
+        GROUP_CONCAT(DISTINCT lu.unit_id) AS unit_ids,
+        GROUP_CONCAT(DISTINCT CONCAT(unit.code, ' - ', unit.name) SEPARATOR ' | ') AS unit_names
     FROM lecturers l
     LEFT JOIN users u ON u.id = l.user_id
     LEFT JOIN lecturer_programmes lp ON lp.lecturer_id = l.id
     LEFT JOIN lecturer_departments ld ON ld.lecturer_id = l.id
+      LEFT JOIN lecturer_units lu ON lu.lecturer_id = l.id
+      LEFT JOIN units unit ON unit.id = lu.unit_id
     GROUP BY l.id
     ORDER BY l.id
   `)
   ).map(row => ({
     ...serialize(row),
     name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email,
+    phoneNumber: row.phone_number,
     programmeIds: row.programme_ids
       ? String(row.programme_ids).split(',').map(Number)
       : [],
     departmentIds: row.department_ids
       ? String(row.department_ids).split(',').map(Number)
-      : []
+      : [],
+    unitIds: row.unit_ids ? String(row.unit_ids).split(',').map(Number) : [],
+    units: row.unit_names ? String(row.unit_names).split(' | ') : []
   }))
 export const createLecturer = async payload => {
   const row = await createRow('lecturers', payload)

@@ -30,16 +30,16 @@ const navByRole = {
     },
     {
       group: 'Academic',
-      label: 'Units',
-      icon: faBookOpen,
-      to: '/courses'
+      label: 'Academic setup',
+      icon: faSchool,
+      to: '/academic/setup'
     },
     { group: 'Academic', label: 'Cohorts', icon: faUsers, to: '/cohorts' },
     {
       group: 'Academic',
-      label: 'Students',
-      icon: faUserGraduate,
-      to: '/students'
+      label: 'Units',
+      icon: faBookOpen,
+      to: '/courses'
     },
     {
       group: 'Academic',
@@ -49,9 +49,9 @@ const navByRole = {
     },
     {
       group: 'Academic',
-      label: 'Academic setup',
-      icon: faSchool,
-      to: '/academic/setup'
+      label: 'Students',
+      icon: faUserGraduate,
+      to: '/students'
     },
     {
       group: 'Scheduling',
@@ -59,13 +59,13 @@ const navByRole = {
       icon: faTableCells,
       to: '/timetable'
     },
-    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     {
       group: 'Scheduling',
       label: 'Exams',
       icon: faClipboardList,
       to: '/exams'
     },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     { group: 'Reports', label: 'Reports', icon: faChartColumn, to: '/reports' },
     {
       group: 'Communications',
@@ -94,13 +94,13 @@ const navByRole = {
       icon: faTableCells,
       to: '/timetable'
     },
-    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     {
       group: 'Scheduling',
       label: 'Exams',
       icon: faClipboardList,
       to: '/exams'
     },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     {
       group: 'Communications',
       label: 'Notifications',
@@ -121,13 +121,13 @@ const navByRole = {
       icon: faTableCells,
       to: '/timetable'
     },
-    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     {
       group: 'Scheduling',
       label: 'Exams',
       icon: faClipboardList,
       to: '/exams'
     },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     {
       group: 'Communications',
       label: 'Notifications',
@@ -148,7 +148,6 @@ const navByRole = {
       icon: faTableCells,
       to: '/timetable'
     },
-    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     { group: 'Academic', label: 'Cohorts', icon: faUsers, to: '/cohorts' },
     {
       group: 'Scheduling',
@@ -156,6 +155,7 @@ const navByRole = {
       icon: faClipboardList,
       to: '/exams'
     },
+    { group: 'Scheduling', label: 'Venues', icon: faBuilding, to: '/venues' },
     {
       group: 'Communications',
       label: 'Notifications',

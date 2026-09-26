@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
@@ -10,6 +10,11 @@ export default function LoginPage () {
     password: 'admin123'
   })
   const [error, setError] = useState('')
+  useEffect(() => {
+    if (!error) return undefined
+    const timeout = setTimeout(() => setError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [error])
   const [loading, setLoading] = useState(false)
 
   const handleChange = event => {

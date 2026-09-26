@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 
@@ -22,6 +22,15 @@ export default function LecturersPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyLecturer)
   const [formError, setFormError] = useState('')
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('name')
 
   const {
     data = [],
@@ -49,6 +58,43 @@ export default function LecturersPage () {
       department.name || department.code
     ])
   )
+
+  const visibleLecturers = useMemo(() => {
+    return [...data]
+      .filter(item => {
+        const name =
+          item.name || `${item.first_name || ''} ${item.last_name || ''}`
+        const text = `${name} ${item.email || ''} ${
+          item.phoneNumber || item.phone_number || ''
+        } ${item.staff_number || ''}`.toLowerCase()
+        const status =
+          item.employment_status ||
+          item.employmentStatus ||
+          item.status ||
+          'ACTIVE'
+        return (
+          text.includes(search.toLowerCase()) &&
+          (statusFilter === 'all' || status === statusFilter)
+        )
+      })
+      .sort((first, second) => {
+        const firstValue = String(
+          sortBy === 'status'
+            ? first.employment_status || first.status || ''
+            : sortBy === 'email'
+            ? first.email || ''
+            : first.name || ''
+        ).toLowerCase()
+        const secondValue = String(
+          sortBy === 'status'
+            ? second.employment_status || second.status || ''
+            : sortBy === 'email'
+            ? second.email || ''
+            : second.name || ''
+        ).toLowerCase()
+        return firstValue.localeCompare(secondValue)
+      })
+  }, [data, search, sortBy, statusFilter])
 
   const createLecturerMutation = useMutation({
     mutationFn: async payload => {
@@ -102,9 +148,27 @@ export default function LecturersPage () {
         </div>
 
         <div className='toolbar-actions'>
-          <button type='button' className='secondary-button'>
-            Filter
-          </button>
+          <input
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder='Search lecturers'
+          />
+          <select
+            value={statusFilter}
+            onChange={event => setStatusFilter(event.target.value)}
+          >
+            <option value='all'>All statuses</option>
+            <option value='ACTIVE'>Active</option>
+            <option value='INACTIVE'>Inactive</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={event => setSortBy(event.target.value)}
+          >
+            <option value='name'>Sort by name</option>
+            <option value='email'>Sort by email</option>
+            <option value='status'>Sort by status</option>
+          </select>
           <button
             type='button'
             className='primary-button'
@@ -240,15 +304,17 @@ export default function LecturersPage () {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
                 <th>Department</th>
-                <th>Courses</th>
+                <th>Units</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {(data || []).length ? (
-                (data || []).map(item => (
+              {visibleLecturers.length ? (
+                visibleLecturers.map(item => (
                   <tr key={item.id ?? item.staff_number}>
                     <td>
                       {item.name ||
@@ -258,6 +324,8 @@ export default function LecturersPage () {
                         item.title ||
                         'Lecturer'}
                     </td>
+                    <td>{item.email || 'N/A'}</td>
+                    <td>{item.phoneNumber || item.phone_number || 'N/A'}</td>
                     <td>
                       {departmentNameMap[
                         String(item.department_id ?? item.departmentId)
@@ -265,7 +333,9 @@ export default function LecturersPage () {
                         item.department ||
                         'General'}
                     </td>
-                    <td>{item.courses || item.course_count || 'N/A'}</td>
+                    <td>
+                      {item.units?.length ? item.units.join(', ') : 'N/A'}
+                    </td>
                     <td>
                       {item.employment_status ||
                         item.employmentStatus ||
@@ -286,7 +356,7 @@ export default function LecturersPage () {
                 ))
               ) : (
                 <tr>
-                  <td colSpan='5'>No lecturers found.</td>
+                  <td colSpan='7'>No lecturers found.</td>
                 </tr>
               )}
             </tbody>

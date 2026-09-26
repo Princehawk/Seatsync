@@ -1,6 +1,8 @@
 import {
   loginUser,
   registerUser,
+  getProfileStatus,
+  completeAcademicProfile,
   refreshSession,
   clearAuthCookies,
   setAuthCookies
@@ -10,7 +12,8 @@ import {
   listDepartments,
   listProgrammes,
   listAcademicYears,
-  listCohorts
+  listCohorts,
+  listCourses
 } from '../services/academicStructureService.js'
 
 export const registrationOptions = async (req, res) => {
@@ -20,9 +23,22 @@ export const registrationOptions = async (req, res) => {
       departments: await listDepartments(),
       programmes: await listProgrammes(),
       academicYears: await listAcademicYears(),
-      cohorts: await listCohorts()
+      cohorts: await listCohorts(),
+      units: await listCourses()
     }
   })
+}
+
+export const profileStatus = async (req, res) => {
+  res.json({ data: await getProfileStatus(req.user.id) })
+}
+
+export const completeProfile = async (req, res) => {
+  try {
+    res.json({ data: await completeAcademicProfile(req.user.id, req.body) })
+  } catch (error) {
+    res.status(400).json({ message: error.message })
+  }
 }
 
 export const register = async (req, res) => {

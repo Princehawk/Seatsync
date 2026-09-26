@@ -43,7 +43,11 @@ export async function apiRequest (path, options = {}, retry = true) {
   }
 
   if (!ok) {
-    const message = data?.message || 'Request failed.'
+    const conflictMessages = Array.isArray(data?.conflicts)
+      ? data.conflicts.map(conflict => conflict.message).filter(Boolean)
+      : []
+    const message =
+      data?.message || conflictMessages.join(' ') || 'Request failed.'
     throw new Error(message)
   }
 

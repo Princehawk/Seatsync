@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 
@@ -20,6 +20,12 @@ export default function CohortsPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyCohort)
   const [formError, setFormError] = useState('')
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
 
   const {
     data = [],

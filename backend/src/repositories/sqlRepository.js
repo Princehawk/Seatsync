@@ -18,12 +18,21 @@ const normalizePayload = (payload = {}) => {
   return normalized
 }
 
+export const normalizeDateValue = value => {
+  if (!(value instanceof Date)) return value
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(
+    2,
+    '0'
+  )}-${String(value.getUTCDate()).padStart(2, '0')}`
+}
+
 export const normalizeRow = row => {
   if (!row || typeof row !== 'object') return row
 
   const normalized = {}
   Object.entries(row).forEach(([key, value]) => {
-    normalized[toCamelCase(key)] = value
+    normalized[toCamelCase(key)] =
+      key === 'exam_date' ? normalizeDateValue(value) : value
   })
 
   return normalized

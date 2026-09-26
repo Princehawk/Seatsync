@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { weekdayFromDateOnly } from '../utils/dateOnly'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -9,7 +10,22 @@ const toArray = value => {
 }
 
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-const timeSlots = ['08:00', '10:00', '12:00', '14:00']
+const timeSlots = Array.from({ length: 13 }, (_, index) => index + 7)
+
+const formatHour = hour => {
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 || 12
+  return `${displayHour}:00 ${suffix}`
+}
+
+const timeToMinutes = value => {
+  const [hours, minutes] = String(value || '00:00')
+    .split(':')
+    .map(Number)
+  return hours * 60 + minutes
+}
+
+const dateOnly = value => String(value || '').slice(0, 10)
 
 const emptyEntry = {
   academic_year_id: '',
@@ -37,8 +53,17 @@ export default function TimetablePage () {
   const [selectedCohort, setSelectedCohort] = useState('all')
   const [selectedLecturer, setSelectedLecturer] = useState('all')
   const [selectedVenue, setSelectedVenue] = useState('all')
+  const [selectedEventType, setSelectedEventType] = useState('all')
   const [form, setForm] = useState(emptyEntry)
   const [formError, setFormError] = useState('')
+  const [capacityWarning, setCapacityWarning] = useState(null)
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
+  const [selectedEvent, setSelectedEvent] = useState(null)
 
   const {
     data: timetableData = [],
@@ -108,6 +133,24 @@ export default function TimetablePage () {
     }
   })
 
+  const { data: exams = [] } = useQuery({
+    queryKey: ['timetable-exams'],
+    queryFn: async () => toArray(await api.get('/api/exams'))
+  })
+
+  const scheduleRows = useMemo(
+    () => [
+      ...timetableData,
+      ...exams.map(exam => ({
+        ...exam,
+        id: `exam-${exam.id}`,
+        day_of_week: weekdayFromDateOnly(dateOnly(exam.exam_date)),
+        event_type: 'EXAM'
+      }))
+    ],
+    [exams, timetableData]
+  )
+
   const eligibleProgrammes = programmes.filter(
     programme => !form.academic_year_id || true
   )
@@ -165,6 +208,31 @@ export default function TimetablePage () {
     ])
   )
 
+  const eventTypeClass = event =>
+    `event-type-${String(
+      event.event_type || event.eventType || 'LECTURE'
+    ).toLowerCase()}`
+
+  const eventVenues = event =>
+    event.event_type === 'EXAM'
+      ? (event.venueDetails || [])
+          .map(venue => `${venue.name} (${venue.capacity} allocated)`)
+          .join(', ')
+      : venueNameMap[String(event.venue_id ?? event.venueId)] || 'Venue'
+
+  const itemVenueLabel = (event, details) => {
+    if (event.venueDetails?.length) {
+      const total = event.venueDetails.reduce(
+        (sum, venue) => sum + Number(venue.capacity || 0),
+        0
+      )
+      return `${event.venueDetails
+        .map(venue => `${venue.name} (${venue.capacity} allocated)`)
+        .join(', ')} · Total allocated: ${total}`
+    }
+    return details.venue?.name || ''
+  }
+
   const createEntryMutation = useMutation({
     mutationFn: async payload => {
       const response = await api.post('/api/timetable', payload)
@@ -181,7 +249,7 @@ export default function TimetablePage () {
   })
 
   const filteredRows = useMemo(() => {
-    return (timetableData || []).filter(item => {
+    return scheduleRows.filter(item => {
       const courseName =
         courseNameMap[String(item.course_id ?? item.courseId)] || ''
       const venueName =
@@ -210,6 +278,10 @@ export default function TimetablePage () {
       const matchesVenue =
         selectedVenue === 'all' ||
         String(item.venue_id ?? item.venueId) === String(selectedVenue)
+      const matchesEventType =
+        selectedEventType === 'all' ||
+        String(item.event_type || item.eventType || '').toUpperCase() ===
+          selectedEventType
       const matchesProgramme =
         selectedProgramme === 'all' ||
         String(
@@ -226,6 +298,7 @@ export default function TimetablePage () {
         matchesCohort &&
         matchesLecturer &&
         matchesVenue &&
+        matchesEventType &&
         matchesProgramme
       )
     })
@@ -240,7 +313,8 @@ export default function TimetablePage () {
     selectedProgramme,
     selectedSemester,
     selectedVenue,
-    timetableData,
+    selectedEventType,
+    scheduleRows,
     venueNameMap
   ])
 
@@ -254,6 +328,35 @@ export default function TimetablePage () {
     }
     return map
   }, [filteredRows])
+
+  const eventDetails = event => ({
+    unit: event.unitCode
+      ? { code: event.unitCode, name: event.unitName }
+      : courses.find(
+          item => String(item.id) === String(event.course_id ?? event.courseId)
+        ),
+    lecturer: lecturers.find(
+      item => String(item.id) === String(event.lecturer_id ?? event.lecturerId)
+    ),
+    venue:
+      event.venueDetails?.[0] ||
+      venues.find(
+        item => String(item.id) === String(event.venue_id ?? event.venueId)
+      ),
+    cohorts:
+      event.cohortDetails ||
+      (Array.isArray(event.cohort_ids)
+        ? event.cohort_ids
+        : Array.isArray(event.cohortIds)
+        ? event.cohortIds
+        : String(event.cohort_ids || event.cohortIds || '')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean)
+      )
+        .map(id => cohorts.find(item => String(item.id) === String(id)))
+        .filter(Boolean)
+  })
 
   const handleSubmit = event => {
     event.preventDefault()
@@ -274,7 +377,19 @@ export default function TimetablePage () {
       return
     }
 
-    createEntryMutation.mutate({
+    const selectedCohorts = cohorts.filter(cohort =>
+      form.cohort_ids.includes(String(cohort.id))
+    )
+    const expectedStudents = selectedCohorts.reduce(
+      (total, cohort) =>
+        total + Number(cohort.student_count ?? cohort.studentCount ?? 0),
+      0
+    )
+    const selectedVenue = venues.find(
+      venue => String(venue.id) === String(form.venue_id)
+    )
+    const venueCapacity = Number(selectedVenue?.capacity || 0)
+    const payload = {
       ...form,
       academic_year_id: Number(form.academic_year_id) || null,
       semester_id: Number(form.semester_id) || null,
@@ -284,9 +399,21 @@ export default function TimetablePage () {
       cohort_id: Number(form.cohort_ids[0]) || null,
       lecturer_id: Number(form.lecturer_id),
       venue_id: Number(form.venue_id),
-      expected_students: 0,
-      venue_capacity: 0
-    })
+      expected_students: expectedStudents,
+      venue_capacity: venueCapacity
+    }
+
+    if (expectedStudents > venueCapacity) {
+      setCapacityWarning({
+        payload,
+        expectedStudents,
+        venueCapacity,
+        venueName: selectedVenue?.name || 'Selected venue'
+      })
+      return
+    }
+
+    createEntryMutation.mutate(payload)
   }
 
   return (
@@ -473,7 +600,8 @@ export default function TimetablePage () {
                       key={venue.id ?? venue.name}
                       value={venue.id ?? venue.name}
                     >
-                      {venue.name || venue.venue_name}
+                      {venue.name || venue.venue_name} ({venue.capacity || 0}{' '}
+                      seats)
                     </option>
                   ))}
                 </select>
@@ -499,7 +627,11 @@ export default function TimetablePage () {
                           }))
                         }
                       />
-                      <span>{cohort.name}</span>
+                      <span>
+                        {cohort.name} (
+                        {cohort.student_count ?? cohort.studentCount ?? 0}{' '}
+                        students)
+                      </span>
                     </label>
                   ))}
                   {!form.programme_ids.length && (
@@ -685,6 +817,17 @@ export default function TimetablePage () {
               </option>
             ))}
           </select>
+          <select
+            value={selectedEventType}
+            onChange={event => setSelectedEventType(event.target.value)}
+          >
+            <option value='all'>All event types</option>
+            <option value='EXAM'>Exams</option>
+            <option value='LECTURE'>Lectures</option>
+            <option value='TUTORIAL'>Tutorials</option>
+            <option value='SEMINAR'>Seminars</option>
+            <option value='LAB'>Labs</option>
+          </select>
         </div>
       </section>
 
@@ -699,7 +842,7 @@ export default function TimetablePage () {
               <div className='grid-header empty'>Time</div>
               {timeSlots.map(time => (
                 <div key={time} className='time-slot'>
-                  {time}
+                  {formatHour(time)}
                 </div>
               ))}
             </div>
@@ -707,47 +850,47 @@ export default function TimetablePage () {
             {days.map(day => (
               <div key={day} className='day-column'>
                 <div className='grid-header'>{day}</div>
-                {timeSlots.map(time => {
-                  const matches = (eventsByDay[day] || []).filter(item => {
-                    const start = item.start_time || item.startTime || '00:00'
-                    const end = item.end_time || item.endTime || '23:59'
-                    return time >= start && time < end
-                  })
-
-                  return (
-                    <div key={`${day}-${time}`} className='slot-cell'>
-                      {matches.length ? (
-                        matches.map(item => (
-                          <div
-                            key={item.id ?? `${day}-${time}-${item.course_id}`}
-                            className='timetable-card'
-                          >
-                            <strong>
-                              {courseNameMap[
+                <div className='day-schedule'>
+                  {timeSlots.map(time => (
+                    <div key={`${day}-${time}`} className='hour-row' />
+                  ))}
+                  {(eventsByDay[day] || []).map(item => {
+                    const start = timeToMinutes(
+                      item.start_time || item.startTime
+                    )
+                    const end = timeToMinutes(item.end_time || item.endTime)
+                    const top = Math.max(0, ((start - 7 * 60) / 60) * 82)
+                    const height = Math.max(44, ((end - start) / 60) * 82 - 8)
+                    return (
+                      <button
+                        type='button'
+                        key={item.id ?? `${day}-${start}-${item.course_id}`}
+                        className={`timetable-card timetable-card-positioned ${eventTypeClass(
+                          item
+                        )}`}
+                        style={{ top: `${top}px`, height: `${height}px` }}
+                        onClick={() => setSelectedEvent(item)}
+                        title='View timetable details'
+                      >
+                        <strong>
+                          {item.unitCode ||
+                            courses.find(
+                              course =>
+                                String(course.id) ===
                                 String(item.course_id ?? item.courseId)
-                              ] ||
-                                (item.course_id ?? 'Course')}
-                            </strong>
-                            <span>
-                              {venueNameMap[
-                                String(item.venue_id ?? item.venueId)
-                              ] ||
-                                (item.venue_id ?? 'Venue')}
-                            </span>
-                            <small>
-                              {lecturerNameMap[
-                                String(item.lecturer_id ?? item.lecturerId)
-                              ] ||
-                                (item.lecturer_id ?? 'Lecturer')}
-                            </small>
-                          </div>
-                        ))
-                      ) : (
-                        <div className='slot-empty'>Free</div>
-                      )}
-                    </div>
-                  )
-                })}
+                            )?.code ||
+                            item.course_id ||
+                            'Unit'}
+                        </strong>
+                        <span>
+                          {item.start_time || item.startTime} -{' '}
+                          {item.end_time || item.endTime}
+                        </span>
+                        <small>{eventVenues(item)}</small>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             ))}
           </div>
@@ -776,6 +919,199 @@ export default function TimetablePage () {
           </ul>
         )}
       </section>
+
+      {capacityWarning && (
+        <div className='profile-modal-backdrop'>
+          <section className='profile-modal content-panel capacity-warning-modal'>
+            <p className='eyebrow'>Capacity warning</p>
+            <h2>Venue capacity exceeded</h2>
+            <p>
+              The selected cohorts contain {capacityWarning.expectedStudents}{' '}
+              students, but {capacityWarning.venueName} has capacity for{' '}
+              {capacityWarning.venueCapacity}.
+            </p>
+            <p>Do you want to create this timetable entry anyway?</p>
+            <div className='toolbar-actions'>
+              <button
+                type='button'
+                className='primary-button'
+                onClick={() => {
+                  createEntryMutation.mutate({
+                    ...capacityWarning.payload,
+                    allow_capacity_override: true
+                  })
+                  setCapacityWarning(null)
+                }}
+                disabled={createEntryMutation.isPending}
+              >
+                Confirm anyway
+              </button>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setCapacityWarning(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {selectedEvent &&
+        (() => {
+          const details = eventDetails(selectedEvent)
+          return (
+            <div
+              className='profile-modal-backdrop'
+              onClick={() => setSelectedEvent(null)}
+            >
+              <section
+                className='profile-modal content-panel timetable-details-modal'
+                onClick={event => event.stopPropagation()}
+              >
+                <div className='page-header'>
+                  <div>
+                    <p className='eyebrow'>Timetable assignment</p>
+                    <h2>
+                      {details.unit?.code || selectedEvent.course_id || 'Unit'}{' '}
+                      - {details.unit?.name || 'Unit details'}
+                    </h2>
+                  </div>
+                  <button
+                    type='button'
+                    className='secondary-button'
+                    onClick={() => setSelectedEvent(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <dl className='timetable-details-list'>
+                  <div>
+                    <dt>Event type</dt>
+                    <dd>
+                      {selectedEvent.event_type ||
+                        selectedEvent.eventType ||
+                        'LECTURE'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Day</dt>
+                    <dd>
+                      {selectedEvent.day_of_week || selectedEvent.dayOfWeek}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Time</dt>
+                    <dd>
+                      {selectedEvent.start_time || selectedEvent.startTime} -{' '}
+                      {selectedEvent.end_time || selectedEvent.endTime}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Unit code</dt>
+                    <dd>{details.unit?.code || 'N/A'}</dd>
+                  </div>
+                  <div>
+                    <dt>Unit name</dt>
+                    <dd>
+                      {details.unit?.name ||
+                        courseNameMap[
+                          String(
+                            selectedEvent.course_id ?? selectedEvent.courseId
+                          )
+                        ] ||
+                        'N/A'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Lecturer</dt>
+                    <dd>
+                      {details.lecturer?.name ||
+                        lecturerNameMap[
+                          String(
+                            selectedEvent.lecturer_id ??
+                              selectedEvent.lecturerId
+                          )
+                        ] ||
+                        'N/A'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Venue</dt>
+                    <dd>
+                      {itemVenueLabel(selectedEvent, details, eventVenues) ||
+                        venueNameMap[
+                          String(
+                            selectedEvent.venue_id ?? selectedEvent.venueId
+                          )
+                        ] ||
+                        'N/A'}{' '}
+                      {details.venue?.capacity
+                        ? `(${details.venue.capacity} seats)`
+                        : ''}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Event type</dt>
+                    <dd>
+                      {selectedEvent.event_type ||
+                        selectedEvent.eventType ||
+                        'N/A'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{selectedEvent.status || 'SCHEDULED'}</dd>
+                  </div>
+                  <div>
+                    <dt>Academic year</dt>
+                    <dd>
+                      {academicYears.find(
+                        item =>
+                          String(item.id) ===
+                          String(
+                            selectedEvent.academic_year_id ??
+                              selectedEvent.academicYearId
+                          )
+                      )?.name || 'N/A'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Semester</dt>
+                    <dd>
+                      {semesters.find(
+                        item =>
+                          String(item.id) ===
+                          String(
+                            selectedEvent.semester_id ??
+                              selectedEvent.semesterId
+                          )
+                      )?.name || 'N/A'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Cohorts</dt>
+                    <dd>
+                      {details.cohorts.length
+                        ? details.cohorts
+                            .map(
+                              cohort =>
+                                `${cohort.name} (${
+                                  cohort.student_count ??
+                                  cohort.studentCount ??
+                                  0
+                                } students)`
+                            )
+                            .join(', ')
+                        : 'N/A'}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            </div>
+          )
+        })()}
     </div>
   )
 }

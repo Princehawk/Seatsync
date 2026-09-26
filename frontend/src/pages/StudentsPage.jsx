@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 
@@ -21,6 +21,15 @@ export default function StudentsPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyStudent)
   const [formError, setFormError] = useState('')
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('name')
 
   const {
     data = [],
@@ -45,6 +54,38 @@ export default function StudentsPage () {
   const cohortNameMap = Object.fromEntries(
     (cohorts || []).map(cohort => [String(cohort.id), cohort.name])
   )
+
+  const visibleStudents = useMemo(() => {
+    return [...data]
+      .filter(item => {
+        const name =
+          item.name || `${item.first_name || ''} ${item.last_name || ''}`
+        const text = `${name} ${item.email || ''} ${
+          item.phoneNumber || item.phone_number || ''
+        } ${item.student_number || ''}`.toLowerCase()
+        return (
+          text.includes(search.toLowerCase()) &&
+          (statusFilter === 'all' || (item.status || 'ACTIVE') === statusFilter)
+        )
+      })
+      .sort((first, second) => {
+        const firstValue = String(
+          sortBy === 'status'
+            ? first.status || ''
+            : sortBy === 'email'
+            ? first.email || ''
+            : first.name || ''
+        ).toLowerCase()
+        const secondValue = String(
+          sortBy === 'status'
+            ? second.status || ''
+            : sortBy === 'email'
+            ? second.email || ''
+            : second.name || ''
+        ).toLowerCase()
+        return firstValue.localeCompare(secondValue)
+      })
+  }, [data, search, sortBy, statusFilter])
 
   const createStudentMutation = useMutation({
     mutationFn: async payload => {
@@ -98,9 +139,27 @@ export default function StudentsPage () {
         </div>
 
         <div className='toolbar-actions'>
-          <button type='button' className='secondary-button'>
-            Filter
-          </button>
+          <input
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder='Search students'
+          />
+          <select
+            value={statusFilter}
+            onChange={event => setStatusFilter(event.target.value)}
+          >
+            <option value='all'>All statuses</option>
+            <option value='ACTIVE'>Active</option>
+            <option value='INACTIVE'>Inactive</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={event => setSortBy(event.target.value)}
+          >
+            <option value='name'>Sort by name</option>
+            <option value='email'>Sort by email</option>
+            <option value='status'>Sort by status</option>
+          </select>
           <button
             type='button'
             className='primary-button'
@@ -223,14 +282,16 @@ export default function StudentsPage () {
               <tr>
                 <th>Name</th>
                 <th>Student ID</th>
+                <th>Email</th>
+                <th>Phone</th>
                 <th>Cohort</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {(data || []).length ? (
-                (data || []).map(item => (
+              {visibleStudents.length ? (
+                visibleStudents.map(item => (
                   <tr key={item.id ?? item.student_number}>
                     <td>
                       {item.name ||
@@ -239,6 +300,8 @@ export default function StudentsPage () {
                         }`.trim() ||
                         'Student'}
                     </td>
+                    <td>{item.email || 'N/A'}</td>
+                    <td>{item.phoneNumber || item.phone_number || 'N/A'}</td>
                     <td>
                       {item.student_number || item.studentNumber || 'N/A'}
                     </td>
@@ -262,7 +325,7 @@ export default function StudentsPage () {
                 ))
               ) : (
                 <tr>
-                  <td colSpan='5'>No students found.</td>
+                  <td colSpan='7'>No students found.</td>
                 </tr>
               )}
             </tbody>

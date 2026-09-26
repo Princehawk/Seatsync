@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import { api } from '../api/client'
@@ -52,6 +52,12 @@ export default function AcademicSetupPage () {
   const [unitSearch, setUnitSearch] = useState('')
   const [unitProgrammeFilter, setUnitProgrammeFilter] = useState('all')
   const [unitSort, setUnitSort] = useState('name')
+
+  useEffect(() => {
+    if (!formError) return undefined
+    const timeout = setTimeout(() => setFormError(''), 5000)
+    return () => clearTimeout(timeout)
+  }, [formError])
 
   const { data: faculties = [], isLoading: facultiesLoading } = useQuery({
     queryKey: ['academic-faculties'],
