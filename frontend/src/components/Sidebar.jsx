@@ -29,6 +29,12 @@ const navByRole = {
       to: '/dashboard'
     },
     {
+      group: 'Overview',
+      label: 'Users',
+      icon: faUsersCog,
+      to: '/admin/users'
+    },
+    {
       group: 'Academic',
       label: 'Academic setup',
       icon: faSchool,
@@ -72,12 +78,6 @@ const navByRole = {
       label: 'Notifications',
       icon: faBell,
       to: '/notifications'
-    },
-    {
-      group: 'Administration',
-      label: 'Users',
-      icon: faUsersCog,
-      to: '/admin/users'
     }
   ],
   LECTURER: [

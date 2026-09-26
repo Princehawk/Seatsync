@@ -221,15 +221,71 @@ export const updateSemester = async (id, updates) => {
   return row ? serialize(row) : null
 }
 
-export const listCohorts = async () =>
-  (
-    await rawQuery(`
-    SELECT c.*, p.department_id
-    FROM cohorts c
-    LEFT JOIN programmes p ON p.id = c.programme_id
-    ORDER BY c.id
-  `)
-  ).map(serialize)
+const pageOptions = ({ page = 1, limit = 20 } = {}) => {
+  const pageNumber = Math.max(1, Number.parseInt(page, 10) || 1)
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20))
+  return {
+    page: pageNumber,
+    limit: pageSize,
+    offset: (pageNumber - 1) * pageSize
+  }
+}
+
+export const listCohorts = async options => {
+  if (!options || (options.page === undefined && options.limit === undefined)) {
+    return (
+      await rawQuery(`
+      SELECT c.*, p.department_id
+      FROM cohorts c
+      LEFT JOIN programmes p ON p.id = c.programme_id
+      WHERE c.is_active = TRUE
+      ORDER BY c.id
+    `)
+    ).map(serialize)
+  }
+
+  const { page, limit, offset } = pageOptions(options)
+  const clauses = ['c.is_active = TRUE']
+  const params = []
+  if (options.search) {
+    clauses.push('(c.name LIKE ? OR p.name LIKE ?)')
+    params.push(`%${options.search}%`, `%${options.search}%`)
+  }
+  if (options.programme) {
+    clauses.push('c.programme_id = ?')
+    params.push(Number(options.programme))
+  }
+  if (options.academicYear) {
+    clauses.push('c.academic_year_id = ?')
+    params.push(Number(options.academicYear))
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+  const sortColumns = {
+    name: 'c.name',
+    students: 'c.student_count',
+    year: 'c.academic_year_id'
+  }
+  const orderBy = sortColumns[options.sort] || 'c.name'
+  const direction =
+    String(options.direction).toLowerCase() === 'desc' ? 'DESC' : 'ASC'
+  const rows = await rawQuery(
+    `SELECT c.*, p.department_id FROM cohorts c LEFT JOIN programmes p ON p.id = c.programme_id ${where} ORDER BY ${orderBy} ${direction}, c.id LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  )
+  const [{ total = 0 } = {}] = await rawQuery(
+    `SELECT COUNT(*) AS total FROM cohorts c LEFT JOIN programmes p ON p.id = c.programme_id ${where}`,
+    params
+  )
+  return {
+    data: rows.map(serialize),
+    pagination: {
+      page,
+      limit,
+      totalItems: Number(total),
+      totalPages: Math.max(1, Math.ceil(Number(total) / limit))
+    }
+  }
+}
 export const createCohort = async payload => {
   const row = await createRow('cohorts', payload)
   return row ? serialize(row) : null
@@ -243,6 +299,26 @@ export const updateCohort = async (id, updates) => {
   return row ? serialize(row) : null
 }
 export const deleteCohort = async id => deleteRow('cohorts', id)
+export const archiveCohort = async id => {
+  const row = await updateRow('cohorts', id, { is_active: false })
+  return row ? serialize(row) : null
+}
+export const getCohortDeletionBlockers = async id => {
+  const [references] = await rawQuery(
+    `SELECT
+       (SELECT COUNT(*) FROM timetable_entry_cohorts WHERE cohort_id = ?) AS timetable_entries,
+       (SELECT COUNT(*) FROM timetable_entries WHERE cohort_id = ?) AS primary_timetable_entries,
+       (SELECT COUNT(*) FROM students WHERE cohort_id = ?) AS students,
+       (SELECT COUNT(*) FROM cohort_courses WHERE cohort_id = ?) AS cohort_courses,
+       (SELECT COUNT(*) FROM exam_cohorts WHERE cohort_id = ?) AS exams,
+       (SELECT COUNT(*) FROM cohort_representatives WHERE cohort_id = ?) AS representatives,
+       (SELECT COUNT(*) FROM academic_events WHERE cohort_id = ?) AS academic_events`,
+    [id, id, id, id, id, id, id]
+  )
+  return Object.fromEntries(
+    Object.entries(references || {}).filter(([, count]) => Number(count) > 0)
+  )
+}
 
 export const listStudents = async () =>
   (
@@ -316,7 +392,7 @@ export const updateLecturer = async (id, updates) => {
 }
 export const deleteLecturer = async id => deleteRow('lecturers', id)
 
-export const listCourses = async user => {
+export const listCourses = async (user, options) => {
   const roles = Array.isArray(user?.roles) ? user.roles : []
   let filter = ''
   const params = []
@@ -330,29 +406,81 @@ export const listCourses = async user => {
     params.push(user.id)
   }
 
-  return (
-    await rawQuery(
-      `
+  const paginated =
+    options && (options.page !== undefined || options.limit !== undefined)
+  const clauses = []
+  const queryParams = [...params]
+  if (options?.search) {
+    clauses.push('(u.code LIKE ? OR u.name LIKE ? OR u.description LIKE ?)')
+    const search = `%${options.search}%`
+    queryParams.push(search, search, search)
+  }
+  if (options?.department) {
+    clauses.push(
+      'EXISTS (SELECT 1 FROM unit_departments ud_filter WHERE ud_filter.unit_id = u.id AND ud_filter.department_id = ?)'
+    )
+    queryParams.push(Number(options.department))
+  }
+  if (options?.programme) {
+    clauses.push(
+      'EXISTS (SELECT 1 FROM unit_programmes up_filter WHERE up_filter.unit_id = u.id AND up_filter.programme_id = ?)'
+    )
+    queryParams.push(Number(options.programme))
+  }
+  if (options?.year) {
+    clauses.push('u.year_level = ?')
+    queryParams.push(Number(options.year))
+  }
+  const filterParts = [filter.replace(/^WHERE\s*/i, ''), ...clauses].filter(
+    Boolean
+  )
+  const where = filterParts.length ? `WHERE ${filterParts.join(' AND ')}` : ''
+  const sortColumns = { name: 'u.name', code: 'u.code', year: 'u.year_level' }
+  const orderBy = sortColumns[options?.sort] || 'u.name'
+  const direction =
+    String(options?.direction).toLowerCase() === 'desc' ? 'DESC' : 'ASC'
+  const pagination = paginated ? pageOptions(options) : null
+  const sql = `
     SELECT u.*, GROUP_CONCAT(DISTINCT up.programme_id) AS programme_ids,
       GROUP_CONCAT(DISTINCT ud.department_id) AS department_ids
     FROM units u
     LEFT JOIN unit_programmes up ON up.unit_id = u.id
     LEFT JOIN unit_departments ud ON ud.unit_id = u.id
-    ${filter}
+    ${where}
     GROUP BY u.id
-    ORDER BY u.id
-  `,
-      params
-    )
-  ).map(row => ({
-    ...serialize(row),
-    programmeIds: row.programme_ids
-      ? String(row.programme_ids).split(',').map(Number)
-      : [],
-    departmentIds: row.department_ids
-      ? String(row.department_ids).split(',').map(Number)
-      : []
-  }))
+    ORDER BY ${orderBy} ${direction}, u.id
+    ${paginated ? 'LIMIT ? OFFSET ?' : ''}
+  `
+  const rows = await rawQuery(
+    sql,
+    paginated
+      ? [...queryParams, pagination.limit, pagination.offset]
+      : queryParams
+  )
+  const mapRows = result =>
+    result.map(row => ({
+      ...serialize(row),
+      programmeIds: row.programme_ids
+        ? String(row.programme_ids).split(',').map(Number)
+        : [],
+      departmentIds: row.department_ids
+        ? String(row.department_ids).split(',').map(Number)
+        : []
+    }))
+  if (!paginated) return mapRows(rows)
+  const [{ total = 0 } = {}] = await rawQuery(
+    `SELECT COUNT(DISTINCT u.id) AS total FROM units u LEFT JOIN unit_programmes up ON up.unit_id = u.id LEFT JOIN unit_departments ud ON ud.unit_id = u.id ${where}`,
+    queryParams
+  )
+  return {
+    data: mapRows(rows),
+    pagination: {
+      page: pagination.page,
+      limit: pagination.limit,
+      totalItems: Number(total),
+      totalPages: Math.max(1, Math.ceil(Number(total) / pagination.limit))
+    }
+  }
 }
 export const createCourse = async payload => {
   const normalizedPayload = { ...payload }
@@ -380,6 +508,12 @@ export const createCourse = async payload => {
   delete normalizedPayload.department_id
   normalizedPayload.department_id = departmentIds[0] || null
 
+  const selectionError = await validateUnitAcademicSelections(
+    departmentIds,
+    programmeIds
+  )
+  if (selectionError) return { validationError: selectionError }
+
   const row = await createRow('units', normalizedPayload)
   if (!row) return null
 
@@ -402,12 +536,105 @@ export const createCourse = async payload => {
   }
 }
 export const getCourse = async id => {
-  const row = await findById('units', id)
-  return row ? serialize(row) : null
+  const courses = await listCourses({ roles: ['ADMIN'] })
+  return courses.find(course => Number(course.id) === Number(id)) || null
 }
 export const updateCourse = async (id, updates) => {
-  const row = await updateRow('units', id, updates)
-  return row ? serialize(row) : null
+  const normalizedPayload = { ...updates }
+  if (
+    normalizedPayload.course_level !== undefined &&
+    normalizedPayload.year_level === undefined
+  ) {
+    normalizedPayload.year_level = normalizedPayload.course_level
+  }
+  delete normalizedPayload.course_level
+  delete normalizedPayload.credit_hours
+  const hasProgrammeUpdate =
+    Array.isArray(normalizedPayload.programme_ids) ||
+    normalizedPayload.programme_id !== undefined
+  const hasDepartmentUpdate =
+    Array.isArray(normalizedPayload.department_ids) ||
+    normalizedPayload.department_id !== undefined
+  const programmeIds = Array.isArray(normalizedPayload.programme_ids)
+    ? normalizedPayload.programme_ids.map(Number).filter(Boolean)
+    : normalizedPayload.programme_id
+    ? [Number(normalizedPayload.programme_id)]
+    : []
+  const departmentIds = Array.isArray(normalizedPayload.department_ids)
+    ? normalizedPayload.department_ids.map(Number).filter(Boolean)
+    : normalizedPayload.department_id
+    ? [Number(normalizedPayload.department_id)]
+    : []
+  delete normalizedPayload.programme_ids
+  delete normalizedPayload.programme_id
+  delete normalizedPayload.department_ids
+  delete normalizedPayload.department_id
+  if (hasDepartmentUpdate)
+    normalizedPayload.department_id = departmentIds[0] || null
+
+  if (hasDepartmentUpdate || hasProgrammeUpdate) {
+    const selections = await getCourse(id)
+    const selectionError = await validateUnitAcademicSelections(
+      hasDepartmentUpdate
+        ? departmentIds
+        : (selections?.departmentIds || []).map(Number),
+      hasProgrammeUpdate
+        ? programmeIds
+        : (selections?.programmeIds || []).map(Number)
+    )
+    if (selectionError) return { validationError: selectionError }
+  }
+
+  const row = await updateRow('units', id, normalizedPayload)
+  if (!row) return null
+
+  if (hasProgrammeUpdate) {
+    await rawQuery('DELETE FROM unit_programmes WHERE unit_id = ?', [id])
+    for (const programmeId of programmeIds) {
+      await rawQuery(
+        'INSERT INTO unit_programmes (unit_id, programme_id) VALUES (?, ?)',
+        [id, programmeId]
+      )
+    }
+  }
+  if (hasDepartmentUpdate) {
+    await rawQuery('DELETE FROM unit_departments WHERE unit_id = ?', [id])
+    for (const departmentId of departmentIds) {
+      await rawQuery(
+        'INSERT INTO unit_departments (unit_id, department_id) VALUES (?, ?)',
+        [id, departmentId]
+      )
+    }
+  }
+
+  return getCourse(id)
+}
+
+const validateUnitAcademicSelections = async (departmentIds, programmeIds) => {
+  if (!departmentIds.length || !programmeIds.length) {
+    return 'Select at least one department and one programme for the unit.'
+  }
+  const departmentPlaceholders = departmentIds.map(() => '?').join(',')
+  const existingDepartments = await rawQuery(
+    `SELECT id FROM departments WHERE id IN (${departmentPlaceholders})`,
+    departmentIds
+  )
+  if (existingDepartments.length !== new Set(departmentIds).size) {
+    return 'One or more selected departments no longer exist.'
+  }
+  const placeholders = programmeIds.map(() => '?').join(',')
+  const rows = await rawQuery(
+    `SELECT id, department_id FROM programmes WHERE id IN (${placeholders})`,
+    programmeIds
+  )
+  if (rows.length !== new Set(programmeIds).size) {
+    return 'One or more selected programmes no longer exist.'
+  }
+  const departmentSet = new Set(departmentIds.map(Number))
+  if (rows.some(row => !departmentSet.has(Number(row.department_id)))) {
+    return 'Every selected programme must belong to a selected department. Review the department and programme selections.'
+  }
+  return null
 }
 export const deleteCourse = async id => deleteRow('units', id)
 

@@ -354,6 +354,10 @@ export const loginUser = async ({ email, password }) => {
     throw new Error('Invalid credentials.')
   }
 
+  if (!user.is_active) {
+    throw new Error('This account has been blocked. Contact an administrator.')
+  }
+
   const valid = await verifyPassword(password, user.password_hash)
   if (!valid) {
     throw new Error('Invalid credentials.')
@@ -386,6 +390,10 @@ export const refreshSession = async refreshToken => {
 
   if (!user) {
     throw new Error('User not found for refresh token.')
+  }
+
+  if (!user.is_active) {
+    throw new Error('This account has been blocked. Contact an administrator.')
   }
 
   const roles = await getUserRoles(user.id)

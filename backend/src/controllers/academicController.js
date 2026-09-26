@@ -22,11 +22,29 @@ import {
   createVenueType,
   createVenue,
   deleteCohort,
+  archiveCohort,
+  getCohort,
+  getCohortDeletionBlockers,
+  updateCohort,
   deleteStudent,
+  getStudent,
   deleteLecturer,
+  getLecturer,
   deleteCourse,
-  deleteVenue
+  getCourse,
+  updateCourse,
+  deleteVenue,
+  getVenue
 } from '../services/academicStructureService.js'
+import { createAuditLog } from '../services/security/securityService.js'
+
+const auditRequest = (req, entry) =>
+  createAuditLog({
+    ...entry,
+    userId: req.user?.id,
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent')
+  })
 
 export const getFaculties = async (req, res) => {
   res.json({ data: await listFaculties() })
@@ -69,15 +87,86 @@ export const addSemester = async (req, res) => {
 }
 
 export const getCohorts = async (req, res) => {
-  res.json({ data: await listCohorts() })
+  const result = await listCohorts(req.query)
+  if (Array.isArray(result)) return res.json({ data: result })
+  return res.json(result)
 }
 
 export const addCohort = async (req, res) => {
   res.status(201).json({ data: await createCohort(req.body) })
 }
 
+export const editCohort = async (req, res) => {
+  const oldValues = await getCohort(req.params.id)
+  if (!oldValues) return res.status(404).json({ message: 'Cohort not found.' })
+  const data = await updateCohort(req.params.id, req.body)
+  await auditRequest(req, {
+    action: 'UPDATE',
+    entityType: 'cohort',
+    entityId: req.params.id,
+    oldValues,
+    newValues: data
+  })
+  return res.json({ data })
+}
+
 export const removeCohort = async (req, res) => {
-  const deleted = await deleteCohort(req.params.id)
+  const oldValues = await getCohort(req.params.id)
+  if (!oldValues) return res.status(404).json({ message: 'Cohort not found.' })
+  const blockers = await getCohortDeletionBlockers(req.params.id)
+  if (Object.keys(blockers).length) {
+    const archived = await archiveCohort(req.params.id)
+    await auditRequest(req, {
+      action: 'ARCHIVE_COHORT',
+      entityType: 'cohort',
+      entityId: req.params.id,
+      oldValues,
+      newValues: archived,
+      reason:
+        'Archived instead of hard deletion because academic records reference the cohort.'
+    })
+    const references = Object.entries(blockers)
+      .map(([name, count]) => `${count} ${name.replaceAll('_', ' ')}`)
+      .join(', ')
+    return res.json({
+      success: true,
+      archived: true,
+      message: `Cohort archived because it is referenced by ${references}. Historical timetable and student records were preserved.`
+    })
+  }
+
+  let deleted
+  try {
+    deleted = await deleteCohort(req.params.id)
+  } catch (error) {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2' || error.errno === 1451) {
+      const archived = await archiveCohort(req.params.id)
+      await auditRequest(req, {
+        action: 'ARCHIVE_COHORT',
+        entityType: 'cohort',
+        entityId: req.params.id,
+        oldValues,
+        newValues: archived,
+        reason:
+          'Archived after a concurrent academic reference prevented hard deletion.'
+      })
+      return res.json({
+        success: true,
+        archived: true,
+        message:
+          'A timetable or academic record referenced this cohort, so it was archived and its history was preserved.'
+      })
+    }
+    throw error
+  }
+  if (deleted) {
+    await auditRequest(req, {
+      action: 'DELETE',
+      entityType: 'cohort',
+      entityId: req.params.id,
+      oldValues
+    })
+  }
   res.json({ success: deleted })
 }
 
@@ -90,7 +179,16 @@ export const addStudent = async (req, res) => {
 }
 
 export const removeStudent = async (req, res) => {
+  const oldValues = await getStudent(req.params.id)
   const deleted = await deleteStudent(req.params.id)
+  if (deleted) {
+    await auditRequest(req, {
+      action: 'DELETE',
+      entityType: 'student',
+      entityId: req.params.id,
+      oldValues
+    })
+  }
   res.json({ success: deleted })
 }
 
@@ -103,20 +201,61 @@ export const addLecturer = async (req, res) => {
 }
 
 export const removeLecturer = async (req, res) => {
+  const oldValues = await getLecturer(req.params.id)
   const deleted = await deleteLecturer(req.params.id)
+  if (deleted) {
+    await auditRequest(req, {
+      action: 'DELETE',
+      entityType: 'lecturer',
+      entityId: req.params.id,
+      oldValues
+    })
+  }
   res.json({ success: deleted })
 }
 
 export const getCourses = async (req, res) => {
-  res.json({ data: await listCourses(req.user) })
+  const result = await listCourses(req.user, req.query)
+  if (Array.isArray(result)) return res.json({ data: result })
+  return res.json(result)
 }
 
 export const addCourse = async (req, res) => {
-  res.status(201).json({ data: await createCourse(req.body) })
+  const data = await createCourse(req.body)
+  if (data?.validationError) {
+    return res.status(400).json({ message: data.validationError })
+  }
+  return res.status(201).json({ data })
+}
+
+export const editCourse = async (req, res) => {
+  const oldValues = await getCourse(req.params.id)
+  if (!oldValues) return res.status(404).json({ message: 'Unit not found.' })
+  const data = await updateCourse(req.params.id, req.body)
+  if (data?.validationError) {
+    return res.status(400).json({ message: data.validationError })
+  }
+  await auditRequest(req, {
+    action: 'UPDATE',
+    entityType: 'unit',
+    entityId: req.params.id,
+    oldValues,
+    newValues: data
+  })
+  return res.json({ data })
 }
 
 export const removeCourse = async (req, res) => {
+  const oldValues = await getCourse(req.params.id)
   const deleted = await deleteCourse(req.params.id)
+  if (deleted) {
+    await auditRequest(req, {
+      action: 'DELETE',
+      entityType: 'unit',
+      entityId: req.params.id,
+      oldValues
+    })
+  }
   res.json({ success: deleted })
 }
 
@@ -137,6 +276,15 @@ export const addVenue = async (req, res) => {
 }
 
 export const removeVenue = async (req, res) => {
+  const oldValues = await getVenue(req.params.id)
   const deleted = await deleteVenue(req.params.id)
+  if (deleted) {
+    await auditRequest(req, {
+      action: 'DELETE',
+      entityType: 'venue',
+      entityId: req.params.id,
+      oldValues
+    })
+  }
   res.json({ success: deleted })
 }

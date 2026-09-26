@@ -12,6 +12,7 @@ import {
   addSemester,
   getCohorts,
   addCohort,
+  editCohort,
   removeCohort,
   getStudents,
   addStudent,
@@ -21,6 +22,7 @@ import {
   removeLecturer,
   getCourses,
   addCourse,
+  editCourse,
   removeCourse,
   getVenueTypes,
   addVenueType,
@@ -68,6 +70,7 @@ router.get(
   getCohorts
 )
 router.post('/cohorts', requireRole('ADMIN'), addCohort)
+router.put('/cohorts/:id', requireRole('ADMIN'), editCohort)
 router.delete('/cohorts/:id', requireRole('ADMIN'), removeCohort)
 router.get(
   '/students',
@@ -89,6 +92,7 @@ router.get(
   getCourses
 )
 router.post('/courses', requireRole('ADMIN'), addCourse)
+router.put('/courses/:id', requireRole('ADMIN'), editCourse)
 router.delete('/courses/:id', requireRole('ADMIN'), removeCourse)
 router.get(
   '/venue-types',

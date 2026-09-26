@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import ConfirmActionModal from '../components/ConfirmActionModal'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -21,6 +22,7 @@ export default function StudentsPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyStudent)
   const [formError, setFormError] = useState('')
+  const [studentToDelete, setStudentToDelete] = useState(null)
 
   useEffect(() => {
     if (!formError) return undefined
@@ -315,7 +317,7 @@ export default function StudentsPage () {
                       <button
                         type='button'
                         className='table-action danger'
-                        onClick={() => deleteStudentMutation.mutate(item.id)}
+                        onClick={() => setStudentToDelete(item)}
                         disabled={deleteStudentMutation.isPending}
                       >
                         Delete
@@ -332,6 +334,24 @@ export default function StudentsPage () {
           </table>
         )}
       </section>
+      {studentToDelete && (
+        <ConfirmActionModal
+          title='Delete student?'
+          message={`Delete ${
+            studentToDelete.name ||
+            `${studentToDelete.first_name || ''} ${
+              studentToDelete.last_name || ''
+            }`.trim()
+          }? This deletion will be recorded in the audit history.`}
+          isPending={deleteStudentMutation.isPending}
+          onCancel={() => setStudentToDelete(null)}
+          onConfirm={() =>
+            deleteStudentMutation.mutate(studentToDelete.id, {
+              onSuccess: () => setStudentToDelete(null)
+            })
+          }
+        />
+      )}
     </div>
   )
 }

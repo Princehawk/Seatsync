@@ -46,13 +46,13 @@ export const createAuditLog = async ({
     valid: true,
     data: {
       ...record,
-      userId: record.user_id,
-      entityType: record.entity_type,
-      entityId: record.entity_id,
-      oldValues: record.old_values,
-      newValues: record.new_values,
-      ipAddress: record.ip_address,
-      userAgent: record.user_agent
+      userId: record.userId ?? record.user_id,
+      entityType: record.entityType ?? record.entity_type,
+      entityId: record.entityId ?? record.entity_id,
+      oldValues: record.oldValues ?? record.old_values,
+      newValues: record.newValues ?? record.new_values,
+      ipAddress: record.ipAddress ?? record.ip_address,
+      userAgent: record.userAgent ?? record.user_agent
     }
   }
 }

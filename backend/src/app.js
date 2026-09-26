@@ -16,6 +16,7 @@ import examRoutes from './routes/examRoutes.js'
 import notificationRoutes from './routes/notificationRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
 import databaseRoutes from './routes/databaseRoutes.js'
+import auditRoutes from './routes/auditRoutes.js'
 import { ensureDefaultAdmin } from './services/auth/authService.js'
 import { requireAuth } from './middleware/authMiddleware.js'
 import {
@@ -90,6 +91,7 @@ app.use('/api/timetable', requireAuth, timetableRoutes)
 app.use('/api/exams', requireAuth, examRoutes)
 app.use('/api/notifications', requireAuth, notificationRoutes)
 app.use('/api/database', requireAuth, databaseRoutes)
+app.use('/api/audit', requireAuth, auditRoutes)
 
 app.use((err, req, res, next) => {
   console.error('[APP_ERROR]', err)

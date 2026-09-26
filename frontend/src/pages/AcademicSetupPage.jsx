@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import { api } from '../api/client'
+import AcademicRecordsTable from '../components/AcademicRecordsTable'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -259,28 +260,26 @@ export default function AcademicSetupPage () {
       if (!config) throw new Error('Unknown academic section')
       return api.post(config.endpoint, payload)
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: [
-          variables.section === 'faculty'
-            ? 'academic-faculties'
-            : variables.section === 'department'
-            ? 'academic-departments'
-            : variables.section === 'programme'
-            ? 'academic-programmes'
-            : variables.section === 'academicYear'
-            ? 'academic-years'
-            : variables.section === 'semester'
-            ? 'academic-semesters'
-            : 'academic-cohorts'
-        ]
-      })
+    onSuccess: async (_, variables) => {
+      const queryKeys =
+        {
+          faculty: ['academic-faculties'],
+          department: ['academic-departments'],
+          programme: ['academic-programmes'],
+          academicYear: ['academic-years'],
+          semester: ['academic-semesters'],
+          cohort: ['academic-cohorts', 'cohorts']
+        }[variables.section] || []
+      await Promise.all(
+        queryKeys.map(queryKey =>
+          queryClient.invalidateQueries({ queryKey: [queryKey] })
+        )
+      )
       setForms(current => ({
         ...current,
         [variables.section]: initialForms[variables.section]
       }))
       setFormError('')
-      setShowBuilder(false)
     },
     onError: err => toast.error(err.message || 'Unable to create record.')
   })
@@ -838,84 +837,210 @@ export default function AcademicSetupPage () {
             ))}
           </div>
 
-          <div className='panel-grid'>
-            <section className='content-panel'>
-              <h2>Faculties</h2>
-              <ul className='simple-list'>
-                {(faculties || []).slice(0, 5).map(item => (
-                  <li key={item.id ?? item.code}>
-                    <span>{item.name || 'Faculty'}</span>
-                    <strong>{item.code || 'N/A'}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className='content-panel'>
-              <h2>Departments</h2>
-              <ul className='simple-list'>
-                {(departments || []).slice(0, 5).map(item => (
-                  <li key={item.id ?? item.code}>
-                    <span>{item.name || 'Department'}</span>
-                    <strong>{item.code || 'N/A'}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </div>
-
-          <div className='panel-grid'>
-            <section className='content-panel'>
-              <h2>Programmes</h2>
-              <ul className='simple-list'>
-                {(programmes || []).slice(0, 5).map(item => (
-                  <li key={item.id ?? item.code}>
-                    <span>{item.name || 'Programme'}</span>
-                    <strong>{item.code || 'N/A'}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className='content-panel'>
-              <h2>Academic years</h2>
-              <ul className='simple-list'>
-                {(academicYears || []).slice(0, 5).map(item => (
-                  <li key={item.id ?? item.name}>
-                    <span>{item.name || 'Academic year'}</span>
-                    <strong>{item.is_current ? 'Current' : 'Archived'}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </div>
-
-          <div className='panel-grid'>
-            <section className='content-panel'>
-              <h2>Semesters</h2>
-              <ul className='simple-list'>
-                {(semesters || []).slice(0, 5).map(item => (
-                  <li key={item.id ?? item.name}>
-                    <span>{item.name || 'Semester'}</span>
-                    <strong>{item.semester_number || 'N/A'}</strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className='content-panel'>
-              <h2>Cohorts</h2>
-              <ul className='simple-list'>
-                {(cohorts || []).slice(0, 5).map(item => (
-                  <li key={item.id ?? item.name}>
-                    <span>{item.name || 'Cohort'}</span>
-                    <strong>
-                      {item.student_count || item.studentCount || 0} students
-                    </strong>
-                  </li>
-                ))}
-              </ul>
-            </section>
+          <div className='academic-records-grid'>
+            <AcademicRecordsTable
+              title='Faculties'
+              records={faculties}
+              columns={[
+                { key: 'name', label: 'Name' },
+                { key: 'code', label: 'Code' }
+              ]}
+              filters={[
+                {
+                  key: 'faculty-code',
+                  label: 'faculty codes',
+                  value: item => item.code || '',
+                  options: faculties
+                    .map(item => ({ value: item.code, label: item.code }))
+                    .filter(item => item.value)
+                }
+              ]}
+            />
+            <AcademicRecordsTable
+              title='Departments'
+              records={departments}
+              columns={[
+                { key: 'name', label: 'Name' },
+                { key: 'code', label: 'Code' },
+                {
+                  key: 'faculty',
+                  label: 'Faculty',
+                  value: item =>
+                    faculties.find(
+                      faculty =>
+                        String(faculty.id) ===
+                        String(item.faculty_id ?? item.facultyId)
+                    )?.name || 'Unassigned'
+                }
+              ]}
+              filters={[
+                {
+                  key: 'faculty',
+                  label: 'faculties',
+                  value: item => item.faculty_id ?? item.facultyId ?? '',
+                  options: faculties.map(item => ({
+                    value: item.id,
+                    label: item.name || item.code
+                  }))
+                }
+              ]}
+            />
+            <AcademicRecordsTable
+              title='Programmes'
+              records={programmes}
+              columns={[
+                { key: 'name', label: 'Name' },
+                { key: 'code', label: 'Code' },
+                {
+                  key: 'department',
+                  label: 'Department',
+                  value: item =>
+                    departments.find(
+                      department =>
+                        String(department.id) ===
+                        String(item.department_id ?? item.departmentId)
+                    )?.name || 'Unassigned'
+                },
+                {
+                  key: 'duration',
+                  label: 'Duration (years)',
+                  value: item =>
+                    item.duration_years ?? item.durationYears ?? '—'
+                }
+              ]}
+              filters={[
+                {
+                  key: 'department',
+                  label: 'departments',
+                  value: item => item.department_id ?? item.departmentId ?? '',
+                  options: departments.map(item => ({
+                    value: item.id,
+                    label: item.name || item.code
+                  }))
+                }
+              ]}
+            />
+            <AcademicRecordsTable
+              title='Academic years'
+              records={academicYears}
+              columns={[
+                { key: 'name', label: 'Name' },
+                {
+                  key: 'start',
+                  label: 'Start date',
+                  value: item => toInputDate(item.start_date ?? item.startDate)
+                },
+                {
+                  key: 'end',
+                  label: 'End date',
+                  value: item => toInputDate(item.end_date ?? item.endDate)
+                },
+                {
+                  key: 'status',
+                  label: 'Status',
+                  value: item =>
+                    item.is_current || item.isCurrent ? 'Current' : 'Archived'
+                }
+              ]}
+              filters={[
+                {
+                  key: 'status',
+                  label: 'statuses',
+                  value: item =>
+                    item.is_current || item.isCurrent ? 'current' : 'archived',
+                  options: [
+                    { value: 'current', label: 'Current' },
+                    { value: 'archived', label: 'Archived' }
+                  ]
+                }
+              ]}
+            />
+            <AcademicRecordsTable
+              title='Semesters'
+              records={semesters}
+              columns={[
+                { key: 'name', label: 'Name' },
+                {
+                  key: 'number',
+                  label: 'Number',
+                  value: item =>
+                    item.number ?? item.semester_number ?? item.semesterNumber
+                },
+                {
+                  key: 'academic-year',
+                  label: 'Academic year',
+                  value: item =>
+                    academicYears.find(
+                      year =>
+                        String(year.id) ===
+                        String(item.academic_year_id ?? item.academicYearId)
+                    )?.name || 'Unassigned'
+                },
+                {
+                  key: 'dates',
+                  label: 'Date range',
+                  value: item =>
+                    `${toInputDate(
+                      item.start_date ?? item.startDate
+                    )} – ${toInputDate(item.end_date ?? item.endDate)}`
+                }
+              ]}
+              filters={[
+                {
+                  key: 'year',
+                  label: 'academic years',
+                  value: item =>
+                    item.academic_year_id ?? item.academicYearId ?? '',
+                  options: academicYears.map(item => ({
+                    value: item.id,
+                    label: item.name
+                  }))
+                }
+              ]}
+            />
+            <AcademicRecordsTable
+              title='Cohorts'
+              records={cohorts}
+              columns={[
+                { key: 'name', label: 'Name' },
+                {
+                  key: 'programme',
+                  label: 'Programme',
+                  value: item =>
+                    programmes.find(
+                      programme =>
+                        String(programme.id) ===
+                        String(item.programme_id ?? item.programmeId)
+                    )?.name || 'Unassigned'
+                },
+                {
+                  key: 'year',
+                  label: 'Academic year',
+                  value: item =>
+                    academicYears.find(
+                      year =>
+                        String(year.id) ===
+                        String(item.academic_year_id ?? item.academicYearId)
+                    )?.name || 'Unassigned'
+                },
+                {
+                  key: 'students',
+                  label: 'Students',
+                  value: item => item.student_count ?? item.studentCount ?? 0
+                }
+              ]}
+              filters={[
+                {
+                  key: 'programme',
+                  label: 'programmes',
+                  value: item => item.programme_id ?? item.programmeId ?? '',
+                  options: programmes.map(item => ({
+                    value: item.id,
+                    label: item.name || item.code
+                  }))
+                }
+              ]}
+            />
           </div>
 
           <section className='content-panel table-panel academic-table-panel'>
@@ -948,40 +1073,42 @@ export default function AcademicSetupPage () {
                 </select>
               </div>
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Unit</th>
-                  <th>Name</th>
-                  <th>Programme</th>
-                  <th>Year</th>
-                  <th>Semester</th>
-                </tr>
-              </thead>
-              <tbody>
-                {programmeUnits.length ? (
-                  programmeUnits.map(unit => (
-                    <tr key={unit.id ?? unit.code}>
-                      <td>{unit.code || 'N/A'}</td>
-                      <td>{unit.name || 'Unnamed unit'}</td>
-                      <td>{unit.programmeName}</td>
-                      <td>{unit.year_level ?? unit.yearLevel ?? 'N/A'}</td>
-                      <td>
-                        {semesters.find(
-                          semester =>
-                            String(semester.id) ===
-                            String(unit.semester_id ?? unit.semesterId)
-                        )?.name || 'Unassigned'}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
+            <div className='academic-records-scroll'>
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan='5'>No units match the selected filters.</td>
+                    <th>Unit</th>
+                    <th>Name</th>
+                    <th>Programme</th>
+                    <th>Year</th>
+                    <th>Semester</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {programmeUnits.length ? (
+                    programmeUnits.map(unit => (
+                      <tr key={unit.id ?? unit.code}>
+                        <td>{unit.code || 'N/A'}</td>
+                        <td>{unit.name || 'Unnamed unit'}</td>
+                        <td>{unit.programmeName}</td>
+                        <td>{unit.year_level ?? unit.yearLevel ?? 'N/A'}</td>
+                        <td>
+                          {semesters.find(
+                            semester =>
+                              String(semester.id) ===
+                              String(unit.semester_id ?? unit.semesterId)
+                          )?.name || 'Unassigned'}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan='5'>No units match the selected filters.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       )}

@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken'
+import { findById } from '../repositories/sqlRepository.js'
 
 import {
   refreshSession,
@@ -31,6 +32,12 @@ export const requireAuth = async (req, res, next) => {
 
   try {
     req.user = verifyToken(token, 'access')
+    const storedUser = await findById('users', req.user.id)
+    if (!storedUser || !(storedUser.isActive ?? storedUser.is_active)) {
+      return res.status(403).json({
+        message: 'This account has been blocked. Contact an administrator.'
+      })
+    }
     return next()
   } catch (error) {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken

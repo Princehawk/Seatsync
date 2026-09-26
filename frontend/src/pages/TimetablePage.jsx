@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { weekdayFromDateOnly } from '../utils/dateOnly'
+import { useAuth } from '../context/AuthContext'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -11,6 +12,9 @@ const toArray = value => {
 
 const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 const timeSlots = Array.from({ length: 13 }, (_, index) => index + 7)
+const TIMETABLE_HOUR_HEIGHT = 72
+const TIMETABLE_HOUR_GAP = 10
+const TIMETABLE_MINUTES_PER_HOUR = TIMETABLE_HOUR_HEIGHT + TIMETABLE_HOUR_GAP
 
 const formatHour = hour => {
   const suffix = hour >= 12 ? 'PM' : 'AM'
@@ -26,6 +30,38 @@ const timeToMinutes = value => {
 }
 
 const dateOnly = value => String(value || '').slice(0, 10)
+
+const idList = (value, fallback) => {
+  if (Array.isArray(value)) return value.map(String)
+  if (value !== undefined && value !== null && value !== '') {
+    return String(value)
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+  return fallback === undefined || fallback === null ? [] : [String(fallback)]
+}
+
+const weekdayKey = value => {
+  const normalized = String(value || '').toLowerCase()
+  return (
+    {
+      mon: 'Mon',
+      monday: 'Mon',
+      tue: 'Tue',
+      tues: 'Tue',
+      tuesday: 'Tue',
+      wed: 'Wed',
+      wednesday: 'Wed',
+      thu: 'Thu',
+      thur: 'Thu',
+      thurs: 'Thu',
+      thursday: 'Thu',
+      fri: 'Fri',
+      friday: 'Fri'
+    }[normalized] || value
+  )
+}
 
 const emptyEntry = {
   academic_year_id: '',
@@ -44,6 +80,7 @@ const emptyEntry = {
 
 export default function TimetablePage () {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState('grid')
@@ -57,6 +94,14 @@ export default function TimetablePage () {
   const [form, setForm] = useState(emptyEntry)
   const [formError, setFormError] = useState('')
   const [capacityWarning, setCapacityWarning] = useState(null)
+  const [makeupForm, setMakeupForm] = useState({
+    effective_date: '',
+    new_venue_id: '',
+    new_start_time: '',
+    new_end_time: '',
+    reason: ''
+  })
+  const [makeupMessage, setMakeupMessage] = useState('')
 
   useEffect(() => {
     if (!formError) return undefined
@@ -198,6 +243,12 @@ export default function TimetablePage () {
       venue.name || venue.venue_name
     ])
   )
+  const unitNameMap = Object.fromEntries(
+    (courses || []).map(unit => [
+      String(unit.id),
+      `${unit.code || ''} ${unit.name || ''}`.trim()
+    ])
+  )
   const cohortNameMap = Object.fromEntries(
     (cohorts || []).map(cohort => [String(cohort.id), cohort.name])
   )
@@ -248,18 +299,60 @@ export default function TimetablePage () {
       setFormError(err.message || 'Unable to create timetable entry.')
   })
 
+  const makeupMutation = useMutation({
+    mutationFn: payload => api.post('/api/timetable/overrides', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['timetable'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+      setMakeupForm({
+        effective_date: '',
+        new_venue_id: '',
+        new_start_time: '',
+        new_end_time: '',
+        reason: ''
+      })
+      setMakeupMessage(
+        'Make-up class request submitted and recorded in the audit log.'
+      )
+    },
+    onError: error =>
+      setMakeupMessage(
+        error.message || 'Unable to submit make-up class request.'
+      )
+  })
+
   const filteredRows = useMemo(() => {
     return scheduleRows.filter(item => {
-      const courseName =
-        courseNameMap[String(item.course_id ?? item.courseId)] || ''
+      const unitId = String(item.course_id ?? item.courseId ?? '')
+      const unitName = unitNameMap[unitId] || courseNameMap[unitId] || ''
       const venueName =
         venueNameMap[String(item.venue_id ?? item.venueId)] || ''
       const lecturerName =
         lecturerNameMap[String(item.lecturer_id ?? item.lecturerId)] || ''
-      const cohortName =
-        cohortNameMap[String(item.cohort_id ?? item.cohortId)] || ''
+      const cohortIds = idList(
+        item.cohortIds ?? item.cohort_ids,
+        item.cohort_id ?? item.cohortId
+      )
+      const eventCohortDetails = Array.isArray(item.cohortDetails)
+        ? item.cohortDetails
+        : []
+      const allCohortIds = Array.from(
+        new Set([
+          ...cohortIds,
+          ...eventCohortDetails.map(cohort => String(cohort.id))
+        ])
+      )
+      const cohortName = allCohortIds
+        .map(
+          id =>
+            cohortNameMap[id] ||
+            eventCohortDetails.find(item => String(item.id) === id)?.name ||
+            ''
+        )
+        .filter(Boolean)
+        .join(' ')
       const matchesSearch =
-        `${courseName} ${venueName} ${lecturerName} ${cohortName}`
+        `${unitName} ${venueName} ${lecturerName} ${cohortName}`
           .toLowerCase()
           .includes(search.toLowerCase())
       const matchesAcademic =
@@ -271,7 +364,7 @@ export default function TimetablePage () {
         String(item.semester_id ?? item.semesterId) === String(selectedSemester)
       const matchesCohort =
         selectedCohort === 'all' ||
-        String(item.cohort_id ?? item.cohortId) === String(selectedCohort)
+        allCohortIds.includes(String(selectedCohort))
       const matchesLecturer =
         selectedLecturer === 'all' ||
         String(item.lecturer_id ?? item.lecturerId) === String(selectedLecturer)
@@ -282,14 +375,24 @@ export default function TimetablePage () {
         selectedEventType === 'all' ||
         String(item.event_type || item.eventType || '').toUpperCase() ===
           selectedEventType
+      const eventProgrammeIds = idList(
+        item.programmeIds ?? item.programme_ids,
+        undefined
+      )
+      const cohortProgrammeIds = allCohortIds
+        .map(
+          id =>
+            cohorts.find(cohort => String(cohort.id) === id)?.programme_id ??
+            cohorts.find(cohort => String(cohort.id) === id)?.programmeId
+        )
+        .filter(value => value !== undefined && value !== null)
+        .map(String)
+      const allProgrammeIds = Array.from(
+        new Set([...eventProgrammeIds, ...cohortProgrammeIds])
+      )
       const matchesProgramme =
         selectedProgramme === 'all' ||
-        String(
-          (cohorts || []).find(
-            cohort =>
-              String(cohort.id) === String(item.cohort_id ?? item.cohortId)
-          )?.programme_id ?? ''
-        ) === String(selectedProgramme)
+        allProgrammeIds.includes(String(selectedProgramme))
 
       return (
         matchesSearch &&
@@ -315,14 +418,15 @@ export default function TimetablePage () {
     selectedVenue,
     selectedEventType,
     scheduleRows,
-    venueNameMap
+    venueNameMap,
+    unitNameMap
   ])
 
   const eventsByDay = useMemo(() => {
     const map = {}
     for (const day of days) map[day] = []
     for (const item of filteredRows || []) {
-      const day = item.day_of_week || item.dayOfWeek || 'Mon'
+      const day = weekdayKey(item.day_of_week || item.dayOfWeek || 'Mon')
       if (!map[day]) map[day] = []
       map[day].push(item)
     }
@@ -734,7 +838,7 @@ export default function TimetablePage () {
             type='text'
             value={search}
             onChange={event => setSearch(event.target.value)}
-            placeholder='Course search'
+            placeholder='Search unit code or name'
           />
           <select
             value={selectedAcademicYear}
@@ -859,8 +963,14 @@ export default function TimetablePage () {
                       item.start_time || item.startTime
                     )
                     const end = timeToMinutes(item.end_time || item.endTime)
-                    const top = Math.max(0, ((start - 7 * 60) / 60) * 82)
-                    const height = Math.max(44, ((end - start) / 60) * 82 - 8)
+                    const top = Math.max(
+                      0,
+                      ((start - 7 * 60) / 60) * TIMETABLE_MINUTES_PER_HOUR
+                    )
+                    const height = Math.max(
+                      1,
+                      ((end - start) / 60) * TIMETABLE_MINUTES_PER_HOUR
+                    )
                     return (
                       <button
                         type='button'
@@ -1108,6 +1218,135 @@ export default function TimetablePage () {
                     </dd>
                   </div>
                 </dl>
+                {(user?.roles || []).some(role =>
+                  ['ADMIN', 'LECTURER'].includes(role)
+                ) &&
+                  !String(selectedEvent.id).startsWith('exam-') && (
+                    <form
+                      className='stack-form makeup-class-form'
+                      onSubmit={event => {
+                        event.preventDefault()
+                        setMakeupMessage('')
+                        makeupMutation.mutate({
+                          timetableEntryId: Number(selectedEvent.id),
+                          effectiveDate: makeupForm.effective_date,
+                          originalVenueId: Number(
+                            selectedEvent.venue_id ?? selectedEvent.venueId
+                          ),
+                          newVenueId: Number(makeupForm.new_venue_id),
+                          originalStartTime:
+                            selectedEvent.start_time ?? selectedEvent.startTime,
+                          newStartTime: makeupForm.new_start_time,
+                          originalEndTime:
+                            selectedEvent.end_time ?? selectedEvent.endTime,
+                          newEndTime: makeupForm.new_end_time,
+                          reason: makeupForm.reason
+                        })
+                      }}
+                    >
+                      <h3>Request a temporary make-up class</h3>
+                      <div className='form-grid'>
+                        <label>
+                          Make-up date
+                          <input
+                            type='date'
+                            required
+                            value={makeupForm.effective_date}
+                            onChange={event =>
+                              setMakeupForm(current => ({
+                                ...current,
+                                effective_date: event.target.value
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Venue
+                          <select
+                            required
+                            value={makeupForm.new_venue_id}
+                            onChange={event =>
+                              setMakeupForm(current => ({
+                                ...current,
+                                new_venue_id: event.target.value
+                              }))
+                            }
+                          >
+                            <option value=''>Select venue</option>
+                            {venues
+                              .filter(venue => venue.status === 'ACTIVE')
+                              .map(venue => (
+                                <option key={venue.id} value={venue.id}>
+                                  {venue.name || venue.venue_name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <label>
+                          Start time
+                          <input
+                            type='time'
+                            required
+                            value={makeupForm.new_start_time}
+                            onChange={event =>
+                              setMakeupForm(current => ({
+                                ...current,
+                                new_start_time: event.target.value
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          End time
+                          <input
+                            type='time'
+                            required
+                            value={makeupForm.new_end_time}
+                            onChange={event =>
+                              setMakeupForm(current => ({
+                                ...current,
+                                new_end_time: event.target.value
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className='full-width'>
+                          Reason
+                          <input
+                            required
+                            value={makeupForm.reason}
+                            onChange={event =>
+                              setMakeupForm(current => ({
+                                ...current,
+                                reason: event.target.value
+                              }))
+                            }
+                            placeholder='Reason for the make-up class'
+                          />
+                        </label>
+                      </div>
+                      {makeupMessage && (
+                        <p
+                          className={
+                            makeupMutation.isError
+                              ? 'form-error'
+                              : 'success-message'
+                          }
+                        >
+                          {makeupMessage}
+                        </p>
+                      )}
+                      <button
+                        type='submit'
+                        className='primary-button'
+                        disabled={makeupMutation.isPending}
+                      >
+                        {makeupMutation.isPending
+                          ? 'Submitting...'
+                          : 'Submit make-up request'}
+                      </button>
+                    </form>
+                  )}
               </section>
             </div>
           )

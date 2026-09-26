@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import ConfirmActionModal from '../components/ConfirmActionModal'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -22,6 +23,7 @@ export default function LecturersPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyLecturer)
   const [formError, setFormError] = useState('')
+  const [lecturerToDelete, setLecturerToDelete] = useState(null)
 
   useEffect(() => {
     if (!formError) return undefined
@@ -346,7 +348,7 @@ export default function LecturersPage () {
                       <button
                         type='button'
                         className='table-action danger'
-                        onClick={() => deleteLecturerMutation.mutate(item.id)}
+                        onClick={() => setLecturerToDelete(item)}
                         disabled={deleteLecturerMutation.isPending}
                       >
                         Delete
@@ -363,6 +365,24 @@ export default function LecturersPage () {
           </table>
         )}
       </section>
+      {lecturerToDelete && (
+        <ConfirmActionModal
+          title='Delete lecturer?'
+          message={`Delete ${
+            lecturerToDelete.name ||
+            `${lecturerToDelete.first_name || ''} ${
+              lecturerToDelete.last_name || ''
+            }`.trim()
+          }? This deletion will be recorded in the audit history.`}
+          isPending={deleteLecturerMutation.isPending}
+          onCancel={() => setLecturerToDelete(null)}
+          onConfirm={() =>
+            deleteLecturerMutation.mutate(lecturerToDelete.id, {
+              onSuccess: () => setLecturerToDelete(null)
+            })
+          }
+        />
+      )}
     </div>
   )
 }

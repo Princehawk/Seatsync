@@ -36,6 +36,11 @@ export default function DashboardPage () {
 
     return items.slice(0, 5).map((item, index) => {
       const title =
+        (item.action
+          ? `${String(item.action).replaceAll('_', ' ')} · ${String(
+              item.entity_type || item.entityType || 'record'
+            ).replaceAll('_', ' ')}`
+          : null) ||
         item.title ||
         item.name ||
         item.course_name ||
@@ -43,6 +48,14 @@ export default function DashboardPage () {
         item.message ||
         `Item ${index + 1}`
       const value =
+        (item.action
+          ? `${
+              [item.first_name, item.last_name].filter(Boolean).join(' ') ||
+              'System'
+            } · ${
+              item.created_at ? new Date(item.created_at).toLocaleString() : ''
+            }`
+          : null) ||
         item.value ||
         item.venue_name ||
         item.venueName ||

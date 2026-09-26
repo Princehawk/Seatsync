@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { formatDateOnly } from '../utils/dateOnly'
+import ConfirmActionModal from '../components/ConfirmActionModal'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -28,6 +29,7 @@ export default function VenuesPage () {
   const [form, setForm] = useState(emptyVenue)
   const [formError, setFormError] = useState('')
   const [allocationVenue, setAllocationVenue] = useState(null)
+  const [venueToDelete, setVenueToDelete] = useState(null)
 
   useEffect(() => {
     if (!formError) return undefined
@@ -388,7 +390,7 @@ export default function VenuesPage () {
                       <button
                         type='button'
                         className='table-action danger'
-                        onClick={() => deleteVenueMutation.mutate(item.id)}
+                        onClick={() => setVenueToDelete(item)}
                         disabled={deleteVenueMutation.isPending}
                       >
                         Delete
@@ -569,6 +571,21 @@ export default function VenuesPage () {
             </div>
           </section>
         </div>
+      )}
+      {venueToDelete && (
+        <ConfirmActionModal
+          title='Delete venue?'
+          message={`Delete ${
+            venueToDelete.name || venueToDelete.venue_name
+          }? This deletion will be recorded in the audit history.`}
+          isPending={deleteVenueMutation.isPending}
+          onCancel={() => setVenueToDelete(null)}
+          onConfirm={() =>
+            deleteVenueMutation.mutate(venueToDelete.id, {
+              onSuccess: () => setVenueToDelete(null)
+            })
+          }
+        />
       )}
     </div>
   )
