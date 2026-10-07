@@ -265,6 +265,39 @@ export const completeAcademicProfile = async (userId, payload) => {
         'Select at least one faculty, department, programme, and unit.'
       )
     }
+    const facultyRows = await query(
+      `SELECT id FROM faculties WHERE id IN (${faculties.map(() => '?').join(',')})`,
+      faculties
+    )
+    const departmentRows = await query(
+      `SELECT id, faculty_id FROM departments WHERE id IN (${departments.map(() => '?').join(',')})`,
+      departments
+    )
+    const programmeRows = await query(
+      `SELECT id, department_id FROM programmes WHERE id IN (${programmes.map(() => '?').join(',')})`,
+      programmes
+    )
+    const unitRows = await query(
+      `SELECT DISTINCT u.id FROM units u
+       JOIN unit_programmes up ON up.unit_id = u.id
+       JOIN programmes p ON p.id = up.programme_id
+       WHERE u.id IN (${units.map(() => '?').join(',')})
+         AND p.id IN (${programmes.map(() => '?').join(',')})
+         AND p.department_id IN (${departments.map(() => '?').join(',')})`,
+      [...units, ...programmes, ...departments]
+    )
+    if (facultyRows.length !== faculties.length ||
+      departmentRows.length !== departments.length ||
+      departmentRows.some(row => !faculties.includes(Number(row.faculty_id)))) {
+      throw new Error('Each selected department must belong to a selected faculty.')
+    }
+    if (programmeRows.length !== programmes.length ||
+      programmeRows.some(row => !departments.includes(Number(row.department_id)))) {
+      throw new Error('Each selected programme must belong to a selected department.')
+    }
+    if (unitRows.length !== units.length) {
+      throw new Error('Each selected unit must belong to a selected programme and department.')
+    }
     const existingLecturer = (
       await query('SELECT id FROM lecturers WHERE user_id = ?', [userId])
     )[0]
@@ -338,6 +371,88 @@ export const completeAcademicProfile = async (userId, payload) => {
       })
   }
   return { complete: true, role }
+}
+
+export const getLecturerAcademicProfile = async userId => {
+  const lecturer = (
+    await query('SELECT * FROM lecturers WHERE user_id = ? LIMIT 1', [userId])
+  )[0]
+  if (!lecturer) return null
+  const [facultyRows, departmentRows, programmeRows, unitRows] = await Promise.all([
+    query('SELECT faculty_id FROM lecturer_faculties WHERE lecturer_id = ?', [lecturer.id]),
+    query('SELECT department_id FROM lecturer_departments WHERE lecturer_id = ?', [lecturer.id]),
+    query('SELECT programme_id FROM lecturer_programmes WHERE lecturer_id = ?', [lecturer.id]),
+    query('SELECT unit_id FROM lecturer_units WHERE lecturer_id = ?', [lecturer.id])
+  ])
+  return {
+    id: lecturer.id,
+    staffNumber: lecturer.staff_number,
+    title: lecturer.title || '',
+    employmentStatus: lecturer.employment_status,
+    facultyIds: facultyRows.map(row => Number(row.faculty_id)),
+    departmentIds: departmentRows.map(row => Number(row.department_id)),
+    programmeIds: programmeRows.map(row => Number(row.programme_id)),
+    unitIds: unitRows.map(row => Number(row.unit_id))
+  }
+}
+
+export const updateLecturerAcademicProfile = async (userId, payload) => {
+  const lecturer = (
+    await query('SELECT * FROM lecturers WHERE user_id = ? LIMIT 1', [userId])
+  )[0]
+  if (!lecturer) throw new Error('Lecturer profile was not found.')
+
+  const faculties = [...new Set((payload.facultyIds || []).map(Number).filter(Boolean))]
+  const departments = [...new Set((payload.departmentIds || []).map(Number).filter(Boolean))]
+  const programmes = [...new Set((payload.programmeIds || []).map(Number).filter(Boolean))]
+  const units = [...new Set((payload.unitIds || []).map(Number).filter(Boolean))]
+  if (!faculties.length || !departments.length || !programmes.length || !units.length) {
+    throw new Error('Select at least one faculty, department, programme, and unit.')
+  }
+
+  const facultyRows = await query(
+    `SELECT id FROM faculties WHERE id IN (${faculties.map(() => '?').join(',')})`,
+    faculties
+  )
+  if (facultyRows.length !== faculties.length) throw new Error('One or more selected faculties are invalid.')
+  const departmentRows = await query(
+    `SELECT id, faculty_id FROM departments WHERE id IN (${departments.map(() => '?').join(',')})`,
+    departments
+  )
+  if (departmentRows.length !== departments.length || departmentRows.some(row => !faculties.includes(Number(row.faculty_id)))) {
+    throw new Error('Each selected department must belong to one of the selected faculties.')
+  }
+  const programmeRows = await query(
+    `SELECT id, department_id FROM programmes WHERE id IN (${programmes.map(() => '?').join(',')})`,
+    programmes
+  )
+  if (programmeRows.length !== programmes.length || programmeRows.some(row => !departments.includes(Number(row.department_id)))) {
+    throw new Error('Each selected programme must belong to one of the selected departments.')
+  }
+  const unitRows = await query(
+    `SELECT DISTINCT u.id
+     FROM units u
+     JOIN unit_programmes up ON up.unit_id = u.id
+     JOIN programmes p ON p.id = up.programme_id
+     WHERE u.id IN (${units.map(() => '?').join(',')})
+       AND p.id IN (${programmes.map(() => '?').join(',')})
+       AND p.department_id IN (${departments.map(() => '?').join(',')})`,
+    [...units, ...programmes, ...departments]
+  )
+  if (unitRows.length !== units.length) {
+    throw new Error('Each selected unit must belong to one of the selected programmes and departments.')
+  }
+
+  await rawQuery('DELETE FROM lecturer_units WHERE lecturer_id = ?', [lecturer.id])
+  await rawQuery('DELETE FROM lecturer_programmes WHERE lecturer_id = ?', [lecturer.id])
+  await rawQuery('DELETE FROM lecturer_departments WHERE lecturer_id = ?', [lecturer.id])
+  await rawQuery('DELETE FROM lecturer_faculties WHERE lecturer_id = ?', [lecturer.id])
+  for (const facultyId of faculties) await rawQuery('INSERT INTO lecturer_faculties (lecturer_id, faculty_id) VALUES (?, ?)', [lecturer.id, facultyId])
+  for (const departmentId of departments) await rawQuery('INSERT INTO lecturer_departments (lecturer_id, department_id) VALUES (?, ?)', [lecturer.id, departmentId])
+  for (const programmeId of programmes) await rawQuery('INSERT INTO lecturer_programmes (lecturer_id, programme_id) VALUES (?, ?)', [lecturer.id, programmeId])
+  for (const unitId of units) await rawQuery('INSERT INTO lecturer_units (lecturer_id, unit_id) VALUES (?, ?)', [lecturer.id, unitId])
+  await rawQuery('UPDATE lecturers SET department_id = ?, title = ? WHERE id = ?', [departments[0], payload.title ?? lecturer.title, lecturer.id])
+  return getLecturerAcademicProfile(userId)
 }
 
 export const loginUser = async ({ email, password }) => {

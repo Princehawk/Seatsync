@@ -348,39 +348,34 @@ export const updateStudent = async (id, updates) => {
 }
 export const deleteStudent = async id => deleteRow('students', id)
 
-export const listLecturers = async () =>
-  (
+export const listLecturers = async user => {
+  const isSelf = (user?.roles || []).includes('LECTURER')
+  return (
     await rawQuery(`
     SELECT l.*, u.first_name, u.last_name, u.email, u.phone_number,
       GROUP_CONCAT(DISTINCT lp.programme_id) AS programme_ids,
-        GROUP_CONCAT(DISTINCT ld.department_id) AS department_ids,
-        GROUP_CONCAT(DISTINCT lu.unit_id) AS unit_ids,
-        GROUP_CONCAT(DISTINCT CONCAT(unit.code, ' - ', unit.name) SEPARATOR ' | ') AS unit_names
+      GROUP_CONCAT(DISTINCT ld.department_id) AS department_ids,
+      GROUP_CONCAT(DISTINCT lu.unit_id) AS unit_ids,
+      GROUP_CONCAT(DISTINCT CONCAT(unit.code, ' - ', unit.name) SEPARATOR ' | ') AS unit_names
     FROM lecturers l
     LEFT JOIN users u ON u.id = l.user_id
     LEFT JOIN lecturer_programmes lp ON lp.lecturer_id = l.id
     LEFT JOIN lecturer_departments ld ON ld.lecturer_id = l.id
-      LEFT JOIN lecturer_units lu ON lu.lecturer_id = l.id
-      LEFT JOIN units unit ON unit.id = lu.unit_id
+    LEFT JOIN lecturer_units lu ON lu.lecturer_id = l.id
+    LEFT JOIN units unit ON unit.id = lu.unit_id
+    ${isSelf ? 'WHERE l.user_id = ?' : ''}
     GROUP BY l.id
     ORDER BY l.id
-  `)
+  `, isSelf ? [user.id] : [])
   ).map(row => ({
     ...serialize(row),
     name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email,
     phoneNumber: row.phone_number,
-    programmeIds: row.programme_ids
-      ? String(row.programme_ids).split(',').map(Number)
-      : [],
-    departmentIds: row.department_ids
-      ? String(row.department_ids).split(',').map(Number)
-      : [],
+    programmeIds: row.programme_ids ? String(row.programme_ids).split(',').map(Number) : [],
+    departmentIds: row.department_ids ? String(row.department_ids).split(',').map(Number) : [],
     unitIds: row.unit_ids ? String(row.unit_ids).split(',').map(Number) : [],
     units: row.unit_names ? String(row.unit_names).split(' | ') : []
   }))
-export const createLecturer = async payload => {
-  const row = await createRow('lecturers', payload)
-  return row ? serialize(row) : null
 }
 export const getLecturer = async id => {
   const row = await findById('lecturers', id)
@@ -402,7 +397,7 @@ export const listCourses = async (user, options) => {
     params.push(user.id)
   } else if (roles.includes('LECTURER')) {
     filter =
-      'WHERE EXISTS (SELECT 1 FROM lecturer_programmes lp_user JOIN lecturers l_user ON l_user.id = lp_user.lecturer_id JOIN unit_programmes lecturer_up ON lecturer_up.programme_id = lp_user.programme_id WHERE l_user.user_id = ? AND lecturer_up.unit_id = u.id)'
+      'WHERE EXISTS (SELECT 1 FROM lecturer_units lu_user JOIN lecturers l_user ON l_user.id = lu_user.lecturer_id WHERE l_user.user_id = ? AND lu_user.unit_id = u.id)'
     params.push(user.id)
   }
 

@@ -1,8 +1,8 @@
 import express from 'express'
 import {
   getTimetable,
-  addTimetableEntry,
-  getAvailability
+  getAvailability,
+  editTimetableEntry
 } from '../controllers/timetableController.js'
 import { createScheduleOverrideController } from '../controllers/overrideController.js'
 import { requireRole } from '../middleware/authMiddleware.js'
@@ -14,7 +14,7 @@ router.get(
   requireRole('ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP'),
   getTimetable
 )
-router.post('/', requireRole('ADMIN', 'LECTURER'), addTimetableEntry)
+router.put('/:id', requireRole('ADMIN'), editTimetableEntry)
 router.get(
   '/availability',
   requireRole('ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP'),

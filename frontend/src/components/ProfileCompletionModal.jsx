@@ -69,6 +69,57 @@ export default function ProfileCompletionModal ({ role }) {
         ? current[field].filter(item => item !== String(value))
         : [...current[field], String(value)]
     }))
+
+  const toggleFaculty = (facultyId, checked) => {
+    setForm(current => {
+      const facultyIds = checked
+        ? [...new Set([...current.facultyIds, String(facultyId)])]
+        : current.facultyIds.filter(id => id !== String(facultyId))
+      const departmentIds = current.departmentIds.filter(id => {
+        const department = departments.find(item => String(item.id) === id)
+        return department && facultyIds.includes(String(department.faculty_id ?? department.facultyId))
+      })
+      const programmeIds = current.programmeIds.filter(id => {
+        const programme = programmes.find(item => String(item.id) === id)
+        return programme && departmentIds.includes(String(programme.department_id ?? programme.departmentId))
+      })
+      const unitIds = current.unitIds.filter(id => {
+        const unit = units.find(item => String(item.id) === id)
+        return unit && (unit.programmeIds || []).some(programmeId => programmeIds.includes(String(programmeId)))
+      })
+      return { ...current, facultyIds, departmentIds, programmeIds, unitIds }
+    })
+  }
+
+  const toggleDepartment = (departmentId, checked) => {
+    setForm(current => {
+      const departmentIds = checked
+        ? [...new Set([...current.departmentIds, String(departmentId)])]
+        : current.departmentIds.filter(id => id !== String(departmentId))
+      const programmeIds = current.programmeIds.filter(id => {
+        const programme = programmes.find(item => String(item.id) === id)
+        return programme && departmentIds.includes(String(programme.department_id ?? programme.departmentId))
+      })
+      const unitIds = current.unitIds.filter(id => {
+        const unit = units.find(item => String(item.id) === id)
+        return unit && (unit.programmeIds || []).some(programmeId => programmeIds.includes(String(programmeId)))
+      })
+      return { ...current, departmentIds, programmeIds, unitIds }
+    })
+  }
+
+  const toggleProgramme = (programmeId, checked) => {
+    setForm(current => {
+      const programmeIds = checked
+        ? [...new Set([...current.programmeIds, String(programmeId)])]
+        : current.programmeIds.filter(id => id !== String(programmeId))
+      const unitIds = current.unitIds.filter(id => {
+        const unit = units.find(item => String(item.id) === id)
+        return unit && (unit.programmeIds || []).some(id => programmeIds.includes(String(id)))
+      })
+      return { ...current, programmeIds, unitIds }
+    })
+  }
   const isLecturer = role === 'LECTURER'
   const submit = event => {
     event.preventDefault()
@@ -99,34 +150,22 @@ export default function ProfileCompletionModal ({ role }) {
         <p className='eyebrow'>Complete academic profile</p>
         <h2>{isLecturer ? 'Teaching assignments' : 'Student information'}</h2>
         <p className='muted'>
-          Complete these details before using the academic workspace.
+          Complete these details before using the academic workspace. Removing a faculty, department, or programme also clears its dependent selections.
         </p>
         <form className='stack-form profile-completion-form' onSubmit={submit}>
           {isLecturer ? (
             <>
               <fieldset className='selection-container'>
                 <legend>Faculties</legend>
-                <div className='checkbox-list'>
+                <div className='checkbox-list lecturer-profile-checkboxes'>
                   {(options.faculties || []).map(item => (
                     <label key={item.id} className='checkbox-option'>
                       <input
                         type='checkbox'
                         checked={form.facultyIds.includes(String(item.id))}
-                        onChange={() =>
-                          setForm(current => ({
-                            ...current,
-                            facultyIds: current.facultyIds.includes(
-                              String(item.id)
-                            )
-                              ? current.facultyIds.filter(
-                                  id => id !== String(item.id)
-                                )
-                              : [...current.facultyIds, String(item.id)],
-                            departmentIds: [],
-                            programmeIds: [],
-                            unitIds: []
-                          }))
-                        }
+                          onChange={event =>
+                            toggleFaculty(item.id, event.target.checked)
+                          }
                       />
                       <span>{item.name || item.code}</span>
                     </label>
@@ -135,13 +174,15 @@ export default function ProfileCompletionModal ({ role }) {
               </fieldset>
               <fieldset className='selection-container'>
                 <legend>Departments</legend>
-                <div className='checkbox-list'>
+                <div className='checkbox-list lecturer-profile-checkboxes'>
                   {facultyDepartments.map(item => (
                     <label key={item.id} className='checkbox-option'>
                       <input
                         type='checkbox'
                         checked={form.departmentIds.includes(String(item.id))}
-                        onChange={() => toggle('departmentIds', item.id)}
+                          onChange={event =>
+                            toggleDepartment(item.id, event.target.checked)
+                          }
                       />
                       <span>{item.name || item.code}</span>
                     </label>
@@ -153,13 +194,15 @@ export default function ProfileCompletionModal ({ role }) {
               </fieldset>
               <fieldset className='selection-container'>
                 <legend>Programmes</legend>
-                <div className='checkbox-list'>
+                <div className='checkbox-list lecturer-profile-checkboxes'>
                   {selectedProgrammes.map(item => (
                     <label key={item.id} className='checkbox-option'>
                       <input
                         type='checkbox'
                         checked={form.programmeIds.includes(String(item.id))}
-                        onChange={() => toggle('programmeIds', item.id)}
+                          onChange={event =>
+                            toggleProgramme(item.id, event.target.checked)
+                          }
                       />
                       <span>{item.name || item.code}</span>
                     </label>
@@ -171,7 +214,7 @@ export default function ProfileCompletionModal ({ role }) {
               </fieldset>
               <fieldset className='selection-container'>
                 <legend>Units</legend>
-                <div className='checkbox-list'>
+                <div className='checkbox-list lecturer-profile-checkboxes'>
                   {selectedUnits.map(item => (
                     <label key={item.id} className='checkbox-option'>
                       <input

@@ -3,13 +3,47 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import PaginationControls from '../components/PaginationControls'
 
-const prettyJson = value => {
-  if (!value) return '—'
-  try {
-    return JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value)
-  } catch {
-    return String(value)
+const prettyAuditDetails = value => {
+  if (!value) return 'No data recorded.'
+
+  const normalize = raw => {
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw)
+      } catch {
+        return raw
+      }
+    }
+    return raw
   }
+
+  const formatValue = raw => {
+    const parsed = normalize(raw)
+
+    if (parsed === null || parsed === undefined) return '—'
+    if (typeof parsed === 'boolean') return parsed ? 'Yes' : 'No'
+    if (typeof parsed === 'number' || typeof parsed === 'string') return String(parsed)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map(item => {
+          if (typeof item === 'object' && item !== null) {
+            return Object.entries(item)
+              .map(([key, entryValue]) => `${key}: ${formatValue(entryValue)}`)
+              .join(', ')
+          }
+          return formatValue(item)
+        })
+        .join(' | ')
+    }
+    if (typeof parsed === 'object') {
+      return Object.entries(parsed)
+        .map(([key, entryValue]) => `${key.replaceAll('_', ' ')}: ${formatValue(entryValue)}`)
+        .join(' • ')
+    }
+    return String(parsed)
+  }
+
+  return formatValue(value)
 }
 
 export default function ReportsPage () {
@@ -22,6 +56,7 @@ export default function ReportsPage () {
   const [direction, setDirection] = useState('desc')
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(20)
+  const [viewingLog, setViewingLog] = useState(null)
 
   const {
     data: result = {},
@@ -185,11 +220,7 @@ export default function ReportsPage () {
                       <td>{log.entity_id ?? '—'}</td>
                       <td>{log.reason || '—'}</td>
                       <td>
-                        <details>
-                          <summary>View</summary>
-                          <small>Before: {prettyJson(log.old_values)}</small>
-                          <small>After: {prettyJson(log.new_values)}</small>
-                        </details>
+                        <button type='button' className='table-action' onClick={() => setViewingLog(log)}>View</button>
                       </td>
                     </tr>
                   ))
@@ -214,6 +245,35 @@ export default function ReportsPage () {
           }}
         />
       </section>
+      {viewingLog && (
+        <div className='profile-modal-backdrop' onClick={() => setViewingLog(null)}>
+          <section className='profile-modal content-panel audit-detail-modal' role='dialog' aria-modal='true' aria-labelledby='audit-detail-heading' onClick={event => event.stopPropagation()}>
+            <div className='page-header'>
+              <div>
+                <p className='eyebrow'>Audit record · #{viewingLog.id}</p>
+                <h2 id='audit-detail-heading'>{String(viewingLog.action || '').replaceAll('_', ' ')}</h2>
+              </div>
+              <button type='button' className='secondary-button' onClick={() => setViewingLog(null)}>Close</button>
+            </div>
+            <dl className='audit-detail-meta'>
+              <div><dt>Actor</dt><dd>{[viewingLog.first_name, viewingLog.last_name].filter(Boolean).join(' ') || viewingLog.email || 'System'}</dd></div>
+              <div><dt>Record</dt><dd>{String(viewingLog.entity_type || '').replaceAll('_', ' ')} #{viewingLog.entity_id ?? '—'}</dd></div>
+              <div><dt>Timestamp</dt><dd>{viewingLog.created_at ? new Date(viewingLog.created_at).toLocaleString() : '—'}</dd></div>
+              <div><dt>Reason</dt><dd>{viewingLog.reason || 'No reason supplied'}</dd></div>
+            </dl>
+            <div className='audit-detail-changes'>
+              <section>
+                <h3>Before</h3>
+                <p>{prettyAuditDetails(viewingLog.old_values)}</p>
+              </section>
+              <section>
+                <h3>After</h3>
+                <p>{prettyAuditDetails(viewingLog.new_values)}</p>
+              </section>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

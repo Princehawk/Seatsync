@@ -3,6 +3,8 @@ import {
   registerUser,
   getProfileStatus,
   completeAcademicProfile,
+  getLecturerAcademicProfile,
+  updateLecturerAcademicProfile,
   refreshSession,
   clearAuthCookies,
   setAuthCookies
@@ -15,6 +17,7 @@ import {
   listCohorts,
   listCourses
 } from '../services/academicStructureService.js'
+import { createAuditLog } from '../services/security/securityService.js'
 
 export const registrationOptions = async (req, res) => {
   res.json({
@@ -38,6 +41,32 @@ export const completeProfile = async (req, res) => {
     res.json({ data: await completeAcademicProfile(req.user.id, req.body) })
   } catch (error) {
     res.status(400).json({ message: error.message })
+  }
+}
+
+export const lecturerProfile = async (req, res) => {
+  const data = await getLecturerAcademicProfile(req.user.id)
+  if (!data) return res.status(404).json({ message: 'Lecturer profile was not found.' })
+  return res.json({ data })
+}
+
+export const updateLecturerProfile = async (req, res) => {
+  try {
+    const oldValues = await getLecturerAcademicProfile(req.user.id)
+    const data = await updateLecturerAcademicProfile(req.user.id, req.body)
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'UPDATE_LECTURER_PROFILE',
+      entityType: 'lecturer',
+      entityId: data.id,
+      oldValues,
+      newValues: data,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    })
+    return res.json({ data })
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to update lecturer profile.' })
   }
 }
 

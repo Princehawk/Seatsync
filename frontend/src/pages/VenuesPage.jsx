@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { io } from 'socket.io-client'
 import { api } from '../api/client'
 import { formatDateOnly } from '../utils/dateOnly'
 import ConfirmActionModal from '../components/ConfirmActionModal'
+import { useAuth } from '../context/AuthContext'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -23,9 +25,21 @@ const emptyVenue = {
 
 export default function VenuesPage () {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canManageVenues = (user?.roles || []).includes('ADMIN')
+  const canViewAllocations = (user?.roles || []).some(role => ['ADMIN', 'LECTURER'].includes(role))
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [now, setNow] = useState(new Date())
   const [showForm, setShowForm] = useState(false)
+  const [showAvailabilityModal, setShowAvailabilityModal] = useState(false)
+  const [availabilityFilters, setAvailabilityFilters] = useState({
+    day: 'Monday',
+    startTime: '',
+    endTime: '',
+    capacity: ''
+  })
+  const [availabilitySearch, setAvailabilitySearch] = useState(null)
   const [form, setForm] = useState(emptyVenue)
   const [formError, setFormError] = useState('')
   const [allocationVenue, setAllocationVenue] = useState(null)
@@ -94,6 +108,90 @@ export default function VenuesPage () {
     (venueTypes || []).map(type => [String(type.id), type.name])
   )
 
+  const socketRef = useRef(null)
+
+  useEffect(() => {
+    const socketUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '')
+    const socket = io(socketUrl, { transports: ['websocket'] })
+    socketRef.current = socket
+
+    socket.on('venue:blocked', () => {
+      queryClient.invalidateQueries({ queryKey: ['venues'] })
+      queryClient.invalidateQueries({ queryKey: ['venue-timetable-allocations'] })
+      queryClient.invalidateQueries({ queryKey: ['venue-exam-allocations'] })
+    })
+
+    socket.on('timetable:override_created', () => {
+      queryClient.invalidateQueries({ queryKey: ['venues'] })
+      queryClient.invalidateQueries({ queryKey: ['venue-timetable-allocations'] })
+    })
+
+    return () => {
+      socket.disconnect()
+      socketRef.current = null
+    }
+  }, [queryClient])
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const getVenueLiveStatus = venue => {
+    if (!venue || !data) return { badge: 'Available now', level: 'ok' }
+
+    const venueId = String(venue.id)
+    const currentDay = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()]
+    const currentTime = now.toTimeString().slice(0, 5)
+
+    const activeTimetableEvent = (timetable || []).find(entry => {
+      if (String(entry.venue_id ?? entry.venueId) !== venueId) return false
+      const entryDay = entry.day_of_week || entry.dayOfWeek
+      const start = String(entry.start_time || entry.startTime || '00:00').slice(0, 5)
+      const end = String(entry.end_time || entry.endTime || '00:00').slice(0, 5)
+      const isRecurring = !entry.effective_date && entryDay === currentDay
+      const isMakeup = Boolean(entry.effective_date) && String(entry.effective_date).slice(0, 10) === now.toISOString().slice(0, 10)
+      return (isRecurring || isMakeup) && currentTime >= start && currentTime < end
+    })
+
+    if (activeTimetableEvent) {
+      return {
+        badge: `${String(activeTimetableEvent.event_type || activeTimetableEvent.eventType || 'Lecture').toUpperCase()} ongoing`,
+        level: 'warn'
+      }
+    }
+
+    const activeExam = (exams || []).find(exam => {
+      const examVenueIds = (exam.venueDetails || []).map(item => String(item.id))
+      if (!examVenueIds.includes(venueId)) return false
+      const examDate = String(exam.exam_date || '').slice(0, 10)
+      const examStart = String(exam.start_time || '00:00').slice(0, 5)
+      const examEnd = String(exam.end_time || '23:59').slice(0, 5)
+      return examDate === now.toISOString().slice(0, 10) && currentTime >= examStart && currentTime < examEnd
+    })
+
+    if (activeExam) {
+      return { badge: 'EXAM ongoing', level: 'warn' }
+    }
+
+    return { badge: 'Available now', level: 'ok' }
+  }
+
+  const { data: availabilityResults = [], isLoading: isLoadingAvailability } = useQuery({
+    queryKey: ['venue-availability', availabilitySearch],
+    queryFn: async () => {
+      if (!availabilitySearch) return []
+      const params = new URLSearchParams()
+      if (availabilitySearch.day) params.set('day', availabilitySearch.day)
+      if (availabilitySearch.startTime) params.set('startTime', availabilitySearch.startTime)
+      if (availabilitySearch.endTime) params.set('endTime', availabilitySearch.endTime)
+      if (availabilitySearch.capacity) params.set('requiredCapacity', String(availabilitySearch.capacity))
+      const response = await api.get(`/api/timetable/availability?${params}`)
+      return toArray(response)
+    },
+    enabled: Boolean(availabilitySearch)
+  })
+
   const createVenueMutation = useMutation({
     mutationFn: async payload => {
       const response = await api.post('/api/academic/venues', payload)
@@ -155,20 +253,27 @@ export default function VenuesPage () {
         </div>
 
         <div className='toolbar-actions'>
-          <button type='button' className='secondary-button'>
+          <button
+            type='button'
+            className='secondary-button'
+            onClick={() => {
+              setShowAvailabilityModal(true)
+              setAvailabilitySearch(null)
+            }}
+          >
             View availability
           </button>
-          <button
+          {canManageVenues && <button
             type='button'
             className='primary-button'
             onClick={() => setShowForm(value => !value)}
           >
             {showForm ? 'Close form' : 'Create venue'}
-          </button>
+          </button>}
         </div>
       </div>
 
-      {showForm && (
+      {showForm && canManageVenues && (
         <section className='content-panel'>
           <form className='stack-form' onSubmit={handleSubmit}>
             <div className='form-grid'>
@@ -341,13 +446,8 @@ export default function VenuesPage () {
           <div className='venue-grid'>
             {filteredVenues.length ? (
               filteredVenues.map(item => {
-                const status = (item.status || 'ACTIVE').toUpperCase()
-                const badgeClass =
-                  status === 'ACTIVE'
-                    ? 'ok'
-                    : status === 'BOOKED'
-                    ? 'warn'
-                    : 'muted'
+                const liveStatus = getVenueLiveStatus(item)
+                const badgeClass = liveStatus.level === 'warn' ? 'warn' : liveStatus.level === 'muted' ? 'muted' : 'ok'
 
                 return (
                   <article
@@ -362,7 +462,7 @@ export default function VenuesPage () {
                         </h3>
                       </div>
                       <span className={`status-badge ${badgeClass}`}>
-                        {status}
+                        {liveStatus.badge}
                       </span>
                     </div>
 
@@ -380,21 +480,21 @@ export default function VenuesPage () {
                     </div>
 
                     <div className='venue-actions'>
-                      <button
+                      {canViewAllocations && <button
                         type='button'
                         className='secondary-button'
                         onClick={() => setAllocationVenue(item)}
                       >
                         View allocations
-                      </button>
-                      <button
+                      </button>}
+                      {canManageVenues && <button
                         type='button'
                         className='table-action danger'
                         onClick={() => setVenueToDelete(item)}
                         disabled={deleteVenueMutation.isPending}
                       >
                         Delete
-                      </button>
+                      </button>}
                     </div>
                   </article>
                 )
@@ -408,6 +508,146 @@ export default function VenuesPage () {
           </div>
         )}
       </section>
+
+      {showAvailabilityModal && (
+        <div
+          className='profile-modal-backdrop'
+          onClick={() => setShowAvailabilityModal(false)}
+        >
+          <section
+            className='profile-modal content-panel venue-allocation-modal'
+            onClick={event => event.stopPropagation()}
+          >
+            <div className='page-header'>
+              <div>
+                <p className='eyebrow'>Availability</p>
+                <h2>Find a suitable venue</h2>
+              </div>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setShowAvailabilityModal(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className='stack-form'>
+              <div className='form-grid'>
+                <label>
+                  Day
+                  <select
+                    value={availabilityFilters.day}
+                    onChange={event =>
+                      setAvailabilityFilters(current => ({
+                        ...current,
+                        day: event.target.value
+                      }))
+                    }
+                  >
+                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Start time
+                  <input
+                    type='time'
+                    value={availabilityFilters.startTime}
+                    onChange={event =>
+                      setAvailabilityFilters(current => ({
+                        ...current,
+                        startTime: event.target.value
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  End time
+                  <input
+                    type='time'
+                    value={availabilityFilters.endTime}
+                    onChange={event =>
+                      setAvailabilityFilters(current => ({
+                        ...current,
+                        endTime: event.target.value
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Capacity needed
+                  <input
+                    type='number'
+                    min='0'
+                    value={availabilityFilters.capacity}
+                    onChange={event =>
+                      setAvailabilityFilters(current => ({
+                        ...current,
+                        capacity: event.target.value
+                      }))
+                    }
+                    placeholder='e.g. 80'
+                  />
+                </label>
+              </div>
+
+              <div className='toolbar-actions'>
+                <button
+                  type='button'
+                  className='primary-button'
+                  onClick={() => {
+                    if (!availabilityFilters.startTime || !availabilityFilters.endTime) {
+                      setAvailabilitySearch({
+                        ...availabilityFilters,
+                        startTime: '',
+                        endTime: ''
+                      })
+                      return
+                    }
+                    setAvailabilitySearch({ ...availabilityFilters })
+                  }}
+                >
+                  Search venues
+                </button>
+                <button
+                  type='button'
+                  className='secondary-button'
+                  onClick={() => {
+                    setAvailabilityFilters({ day: 'Monday', startTime: '', endTime: '', capacity: '' })
+                    setAvailabilitySearch(null)
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <div className='venue-allocation-grid'>
+              {isLoadingAvailability ? (
+                <p>Checking venue availability...</p>
+              ) : availabilitySearch ? (
+                availabilityResults.length ? (
+                  availabilityResults.map(venue => (
+                    <article key={venue.id ?? venue.name} className='venue-allocation-card'>
+                      <strong>{venue.name || venue.venue_name}</strong>
+                      <span>Code: {venue.code || 'N/A'}</span>
+                      <span>Capacity: {venue.capacity || 0} seats</span>
+                      <span>{venue.building || 'Main campus'} · {venue.room_number || 'Room unspecified'}</span>
+                      <small>{(venue.status || 'ACTIVE').toUpperCase()}</small>
+                    </article>
+                  ))
+                ) : (
+                  <p>No venues are available for the selected filters.</p>
+                )
+              ) : (
+                <p>Choose a day, time range, and capacity to see matching venues.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {allocationVenue && (
         <div
@@ -529,6 +769,9 @@ export default function VenuesPage () {
                         {item.entry.day_of_week ||
                           item.entry.dayOfWeek ||
                           'Day unavailable'}
+                        {item.entry.effective_date
+                          ? ` · Make-up ${String(item.entry.effective_date).slice(0, 10)}`
+                          : ''}
                       </span>
                       <span>
                         {item.entry.start_time || item.entry.startTime} -{' '}
@@ -572,7 +815,7 @@ export default function VenuesPage () {
           </section>
         </div>
       )}
-      {venueToDelete && (
+      {venueToDelete && canManageVenues && (
         <ConfirmActionModal
           title='Delete venue?'
           message={`Delete ${

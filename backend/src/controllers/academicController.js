@@ -17,7 +17,6 @@ import {
   createSemester,
   createCohort,
   createStudent,
-  createLecturer,
   createCourse,
   createVenueType,
   createVenue,
@@ -37,6 +36,10 @@ import {
   getVenue
 } from '../services/academicStructureService.js'
 import { createAuditLog } from '../services/security/securityService.js'
+import {
+  getLecturerAcademicProfile,
+  updateLecturerAcademicProfile
+} from '../services/auth/authService.js'
 
 const auditRequest = (req, entry) =>
   createAuditLog({
@@ -193,11 +196,7 @@ export const removeStudent = async (req, res) => {
 }
 
 export const getLecturers = async (req, res) => {
-  res.json({ data: await listLecturers() })
-}
-
-export const addLecturer = async (req, res) => {
-  res.status(201).json({ data: await createLecturer(req.body) })
+  res.json({ data: await listLecturers(req.user) })
 }
 
 export const removeLecturer = async (req, res) => {
@@ -212,6 +211,34 @@ export const removeLecturer = async (req, res) => {
     })
   }
   res.json({ success: deleted })
+}
+
+export const getLecturerAcademicDetails = async (req, res) => {
+  const lecturer = await getLecturer(req.params.id)
+  if (!lecturer) return res.status(404).json({ message: 'Lecturer not found.' })
+  const data = await getLecturerAcademicProfile(lecturer.user_id ?? lecturer.userId)
+  if (!data) return res.status(404).json({ message: 'Lecturer profile was not found.' })
+  return res.json({ data })
+}
+
+export const editLecturerAcademicDetails = async (req, res) => {
+  const lecturer = await getLecturer(req.params.id)
+  if (!lecturer) return res.status(404).json({ message: 'Lecturer not found.' })
+  const userId = lecturer.user_id ?? lecturer.userId
+  const oldValues = await getLecturerAcademicProfile(userId)
+  try {
+    const data = await updateLecturerAcademicProfile(userId, req.body)
+    await auditRequest(req, {
+      action: 'UPDATE_LECTURER_PROFILE',
+      entityType: 'lecturer',
+      entityId: lecturer.id,
+      oldValues,
+      newValues: data
+    })
+    return res.json({ data })
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'Unable to update lecturer academic details.' })
+  }
 }
 
 export const getCourses = async (req, res) => {

@@ -1,43 +1,19 @@
-import {
-  createExam,
-  createExamCohortAllocation,
-  allocateExamVenue
-} from '../services/exams/examService.js'
+import { updateExam } from '../services/exams/examService.js'
 import { normalizeDateValue, query } from '../repositories/sqlRepository.js'
 
-export const createExamController = async (req, res) => {
-  const result = await createExam(req.body)
-
+export const updateExamController = async (req, res) => {
+  const result = await updateExam(req.params.id, req.body)
   if (!result.valid) {
-    return res.status(400).json({ valid: false, conflicts: result.conflicts })
+    const status = result.conflicts.some(item => item.type === 'NOT_FOUND') ? 404 : 400
+    return res.status(status).json({ valid: false, conflicts: result.conflicts })
   }
 
-  return res.status(201).json({ valid: true, data: result.data })
-}
-
-export const createExamCohortAllocationController = async (req, res) => {
-  const result = await createExamCohortAllocation(req.body)
-
-  if (!result.valid) {
-    return res.status(400).json({ valid: false, conflicts: result.conflicts })
-  }
-
-  return res.status(201).json({ valid: true, data: result.data })
-}
-
-export const allocateExamVenueController = async (req, res) => {
-  const result = await allocateExamVenue(req.body)
-
-  if (!result.valid) {
-    return res.status(400).json({ valid: false, conflicts: result.conflicts })
-  }
-
-  return res.status(201).json({ valid: true, data: result.data })
+  return res.json({ valid: true, data: result.data })
 }
 
 export const listExamsController = async (req, res) => {
   const rows = await query(`
-    SELECT e.*,
+    SELECT e.*, DATE_FORMAT(e.exam_date, '%Y-%m-%d') AS exam_date_iso,
       u.code AS unit_code,
       u.name AS unit_name,
       GROUP_CONCAT(DISTINCT p.name SEPARATOR ', ') AS programme_names,
@@ -57,7 +33,7 @@ export const listExamsController = async (req, res) => {
 
   const data = rows.map(row => ({
     ...row,
-    exam_date: normalizeDateValue(row.exam_date),
+    exam_date: row.exam_date_iso || normalizeDateValue(row.exam_date),
     unitCode: row.unit_code,
     unitName: row.unit_name,
     programmes: row.programme_names,

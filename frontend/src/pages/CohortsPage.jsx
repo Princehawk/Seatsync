@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import PaginationControls from '../components/PaginationControls'
+import { useAuth } from '../context/AuthContext'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -19,6 +20,8 @@ const emptyCohort = {
 
 export default function CohortsPage () {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canManageCohorts = (user?.roles || []).includes('ADMIN')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyCohort)
   const [formError, setFormError] = useState('')
@@ -167,7 +170,7 @@ export default function CohortsPage () {
           <h1>Cohorts</h1>
         </div>
 
-        <div className='toolbar-actions'>
+        {canManageCohorts && <div className='toolbar-actions'>
           <button
             type='button'
             className='primary-button'
@@ -175,10 +178,10 @@ export default function CohortsPage () {
           >
             {showForm ? 'Close form' : 'Add cohort'}
           </button>
-        </div>
+        </div>}
       </div>
 
-      {showForm && (
+      {showForm && canManageCohorts && (
         <section className='content-panel'>
           <form className='stack-form' onSubmit={handleSubmit}>
             <div className='form-grid'>
@@ -349,16 +352,16 @@ export default function CohortsPage () {
                   <th>Programme</th>
                   <th>Academic year</th>
                   <th>Students</th>
-                  <th>Actions</th>
+                  {canManageCohorts && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {visibleCohorts.length ? (
                   visibleCohorts.map(item => (
                     <tr key={item.id ?? item.name}>
-                      <td>
+                      {canManageCohorts && <td>
                         {item.name || item.cohort_name || 'Untitled cohort'}
-                      </td>
+                      </td>}
                       <td>
                         {programmes.find(
                           value =>
@@ -414,7 +417,7 @@ export default function CohortsPage () {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan='5'>No cohorts match the selected filters.</td>
+                    <td colSpan={canManageCohorts ? 5 : 4}>No cohorts match the selected filters.</td>
                   </tr>
                 )}
               </tbody>
@@ -434,7 +437,7 @@ export default function CohortsPage () {
         />
       </section>
 
-      {cohortToDelete && (
+      {cohortToDelete && canManageCohorts && (
         <ConfirmActionModal
           title='Delete cohort?'
           message={`Delete ${
@@ -452,7 +455,7 @@ export default function CohortsPage () {
         />
       )}
 
-      {editingCohort && (
+      {editingCohort && canManageCohorts && (
         <div
           className='profile-modal-backdrop'
           onClick={() => setEditingCohort(null)}

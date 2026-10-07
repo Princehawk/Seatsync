@@ -518,6 +518,25 @@ textarea {
   padding-left: 10px;
 }
 
+.lecturer-profile-selections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.lecturer-profile-checkboxes {
+  max-height: 230px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 5px;
+}
+
+@media (max-width: 760px) {
+  .lecturer-profile-selections {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .academic-records-scroll table {
   margin-top: 0;
 }
@@ -563,6 +582,122 @@ textarea {
 
 .pagination-controls select {
   min-width: 72px;
+}
+
+.scrollable-select {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.scrollable-select-trigger {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.scrollable-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.scrollable-select-menu {
+  position: absolute;
+  inset: calc(100% + 4px) 0 auto;
+  z-index: 60;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.scrollable-select-search {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.scrollable-select-options {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.scrollable-select-option {
+  width: 100%;
+  display: block;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scrollable-select-option:hover,
+.scrollable-select-option[aria-selected='true'] {
+  background: var(--surface-muted);
+}
+
+.scrollable-select-empty {
+  padding: 8px;
+  color: var(--muted);
+}
+
+.checkbox-fieldset .checkbox-list {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.timetable-card-crowded {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 5px 6px;
+}
+
+.timetable-card-positioned {
+  right: auto;
+  min-width: 0;
+}
+
+.timetable-card-positioned strong,
+.timetable-card-positioned span,
+.timetable-card-positioned small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timetable-card-positioned span,
+.timetable-card-positioned small {
+  white-space: nowrap;
+}
+
+.timetable-card-crowded strong {
+  display: block;
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timetable-card-detail-hidden {
+  display: none !important;
 }
 
 .audit-log-table {

@@ -107,24 +107,35 @@ export default function DashboardPage () {
 
           <div className='panel-grid'>
             <section className='content-panel'>
-              <h2>Recent items</h2>
+              <h2>{summary.role === 'LECTURER' ? "Today's classes" : 'Recent items'}</h2>
               <ul className='simple-list'>
                 {renderList(
-                  lists.recentTimetableChanges ||
-                    lists.todaysClasses ||
-                    lists.upcomingClasses ||
-                    [],
-                  'No recent items'
+                  summary.role === 'LECTURER'
+                    ? lists.todaysClasses || []
+                    : lists.recentTimetableChanges || lists.upcomingClasses || [],
+                  summary.role === 'LECTURER' ? 'No classes scheduled today' : 'No recent items'
                 )}
               </ul>
             </section>
-
             <section className='content-panel'>
-              <h2>Upcoming exams</h2>
+              <h2>{summary.role === 'LECTURER' ? 'Upcoming teaching' : 'Upcoming exams'}</h2>
               <ul className='simple-list'>
-                {renderList(lists.upcomingExams || [], 'No upcoming exams')}
+                {renderList(
+                  summary.role === 'LECTURER' ? lists.upcomingClasses || [] : lists.upcomingExams || [],
+                  summary.role === 'LECTURER' ? 'No upcoming teaching' : 'No upcoming exams'
+                )}
               </ul>
             </section>
+            {summary.role === 'LECTURER' && <>
+              <section className='content-panel'>
+                <h2>Available venues</h2>
+                <ul className='simple-list'>{renderList(lists.venueAvailability || [], 'No venues are available right now')}</ul>
+              </section>
+              <section className='content-panel'>
+                <h2>Occupied venues</h2>
+                <ul className='simple-list'>{renderList(lists.occupiedVenues || [], 'No venues are occupied right now')}</ul>
+              </section>
+            </>}
           </div>
         </>
       )}

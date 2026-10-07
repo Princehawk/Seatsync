@@ -87,7 +87,8 @@ const navByRole = {
       icon: faChartPie,
       to: '/dashboard'
     },
-    { group: 'Academic', label: 'Units', icon: faBookOpen, to: '/courses' },
+    { group: 'Academic', label: 'My teaching profile', icon: faUsersCog, to: '/lecturer/profile' },
+    { group: 'Academic', label: 'My units', icon: faBookOpen, to: '/courses' },
     {
       group: 'Scheduling',
       label: 'Timetable',

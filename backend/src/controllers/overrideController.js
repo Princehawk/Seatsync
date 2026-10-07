@@ -4,7 +4,9 @@ import { createAuditLog } from '../services/security/securityService.js'
 export const createScheduleOverrideController = async (req, res) => {
   const result = await createScheduleOverride({
     ...req.body,
-    createdBy: req.user?.id
+    createdBy: req.user?.id,
+    requesterUserId: req.user?.id,
+    requesterRoles: req.user?.roles || []
   })
 
   if (!result.valid) {

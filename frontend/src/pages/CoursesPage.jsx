@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import PaginationControls from '../components/PaginationControls'
+import { useAuth } from '../context/AuthContext'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -58,6 +59,8 @@ const toggleProgramme = (current, programmeId, checked) => ({
 
 export default function CoursesPage () {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const canManageUnits = (user?.roles || []).includes('ADMIN')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyUnit)
   const [formError, setFormError] = useState('')
@@ -250,17 +253,17 @@ export default function CoursesPage () {
         </div>
 
         <div className='toolbar-actions'>
-          <button
+          {canManageUnits && <button
             type='button'
             className='primary-button'
             onClick={() => setShowForm(value => !value)}
           >
             {showForm ? 'Close form' : 'Add unit'}
-          </button>
+          </button>}
         </div>
       </div>
 
-      {showForm && (
+      {showForm && canManageUnits && (
         <section className='content-panel'>
           <form className='stack-form' onSubmit={handleSubmit}>
             <div className='form-grid'>
@@ -525,7 +528,7 @@ export default function CoursesPage () {
                   <th>Programme</th>
                   <th>Year</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  {canManageUnits && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -543,15 +546,15 @@ export default function CoursesPage () {
                         {(item.programmeIds || [])
                           .map(id => programmeNameMap[String(id)])
                           .filter(Boolean)
-                          .join(', ') || 'Unassigned'}
-                      </td>
+                            .join(', ') || 'Unassigned'}
+                          </td>
                       <td>{item.year_level ?? item.yearLevel ?? 'N/A'}</td>
                       <td>
                         {item.is_active ?? item.isActive
                           ? 'Active'
                           : 'Inactive'}
                       </td>
-                      <td>
+                      {canManageUnits && <td>
                         <button
                           type='button'
                           className='table-action'
@@ -591,12 +594,12 @@ export default function CoursesPage () {
                         >
                           Delete
                         </button>
-                      </td>
+                      </td>}
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan='7'>No unit records found.</td>
+                    <td colSpan={canManageUnits ? 7 : 6}>No unit records found.</td>
                   </tr>
                 )}
               </tbody>
@@ -616,7 +619,7 @@ export default function CoursesPage () {
         />
       </section>
 
-      {unitToDelete && (
+      {unitToDelete && canManageUnits && (
         <ConfirmActionModal
           title='Delete unit?'
           message={`Delete ${
@@ -632,7 +635,7 @@ export default function CoursesPage () {
         />
       )}
 
-      {editingUnit && (
+      {editingUnit && canManageUnits && (
         <div
           className='profile-modal-backdrop'
           onClick={() => setEditingUnit(null)}

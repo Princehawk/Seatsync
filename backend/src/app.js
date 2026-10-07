@@ -17,6 +17,7 @@ import notificationRoutes from './routes/notificationRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
 import databaseRoutes from './routes/databaseRoutes.js'
 import auditRoutes from './routes/auditRoutes.js'
+import scheduleRoutes from './routes/scheduleRoutes.js'
 import { ensureDefaultAdmin } from './services/auth/authService.js'
 import { requireAuth } from './middleware/authMiddleware.js'
 import {
@@ -88,6 +89,7 @@ app.use('/api/dashboard', requireAuth, dashboardRoutes)
 app.use('/api/academic', requireAuth, academicRoutes)
 app.use('/api/venues', requireAuth, venueRoutes)
 app.use('/api/timetable', requireAuth, timetableRoutes)
+app.use('/api/schedules', requireAuth, scheduleRoutes)
 app.use('/api/exams', requireAuth, examRoutes)
 app.use('/api/notifications', requireAuth, notificationRoutes)
 app.use('/api/database', requireAuth, databaseRoutes)

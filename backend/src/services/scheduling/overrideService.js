@@ -1,4 +1,4 @@
-import { checkVenueBlockConflict } from './conflictService.js'
+import { validateTimetableEntry } from './conflictService.js'
 import { emitSocketEvent } from '../../socket/socketEvents.js'
 import {
   createRow,
@@ -10,17 +10,17 @@ import {
 export const createScheduleOverride = async ({
   timetableEntryId,
   effectiveDate,
-  originalVenueId,
   newVenueId,
-  originalStartTime,
   newStartTime,
-  originalEndTime,
   newEndTime,
   reason,
   status,
   createdBy,
-  venueBlocks
+  venueBlocks,
+  requesterUserId,
+  requesterRoles = []
 }) => {
+  const value = (camel, snake) => timetableEntry?.[camel] ?? timetableEntry?.[snake]
   if (
     !timetableEntryId ||
     !effectiveDate ||
@@ -48,6 +48,37 @@ export const createScheduleOverride = async ({
     }
   }
 
+  const roles = Array.isArray(requesterRoles) ? requesterRoles : [requesterRoles]
+  if (!roles.includes('ADMIN')) {
+    const lecturer = await findById('lecturers', value('lecturerId', 'lecturer_id'))
+    if (!lecturer || Number(lecturer.userId ?? lecturer.user_id) !== Number(requesterUserId)) {
+      return {
+        valid: false,
+        conflicts: [{ type: 'FORBIDDEN', message: 'You can only reschedule your own classes.' }]
+      }
+    }
+  }
+
+  if (String(newStartTime) >= String(newEndTime)) {
+    return {
+      valid: false,
+      conflicts: [{ type: 'VALIDATION_ERROR', message: 'The end time must be later than the start time.' }]
+    }
+  }
+
+  const existingOverride = await query(
+    `SELECT id FROM schedule_overrides
+     WHERE timetable_entry_id = ? AND effective_date = ? AND status = 'APPROVED'
+     LIMIT 1`,
+    [timetableEntryId, effectiveDate]
+  )
+  if (existingOverride.length) {
+    return {
+      valid: false,
+      conflicts: [{ type: 'VALIDATION_ERROR', message: 'This class already has a make-up arrangement for that date.' }]
+    }
+  }
+
   const newVenue = await findById('venues', newVenueId)
   if (!newVenue || newVenue.status !== 'ACTIVE') {
     return {
@@ -55,6 +86,21 @@ export const createScheduleOverride = async ({
       conflicts: [
         { type: 'VALIDATION_ERROR', message: 'Select an active venue.' }
       ]
+    }
+  }
+  const [studentCount] = await query(
+    `SELECT COALESCE(NULLIF(SUM(c.student_count), 0),
+       (SELECT student_count FROM cohorts WHERE id = ?), 0) AS total
+     FROM timetable_entry_cohorts tec
+     JOIN cohorts c ON c.id = tec.cohort_id
+     WHERE tec.timetable_entry_id = ?`,
+    [value('cohortId', 'cohort_id'), timetableEntryId]
+  )
+  const cohortCount = Number(studentCount?.total || 0)
+  if (cohortCount > Number(newVenue.capacity || 0)) {
+    return {
+      valid: false,
+      conflicts: [{ type: 'VENUE_CAPACITY_CONFLICT', message: `${newVenue.name} has capacity for ${newVenue.capacity} students, but the class has ${cohortCount}.` }]
     }
   }
 
@@ -91,9 +137,47 @@ export const createScheduleOverride = async ({
       ]
     }
   }
-  const validation = checkVenueBlockConflict({
+  const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][
+    new Date(`${effectiveDate}T00:00:00Z`).getUTCDay()
+  ]
+  const [timetableRows, examRows] = await Promise.all([
+    query(
+      `SELECT te.*, GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids
+       FROM timetable_entries te
+       LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+      WHERE te.day_of_week IN (?, ?, ?, ?) AND te.status = 'SCHEDULED'
+       GROUP BY te.id`,
+          [dayOfWeek, dayOfWeek.slice(0, 3), dayOfWeek.toUpperCase(), dayOfWeek.slice(0, 3).toUpperCase()]
+    ),
+    query(
+      `SELECT e.id, e.start_time, e.end_time, 'EXAM' AS event_type,
+         GROUP_CONCAT(DISTINCT eva.venue_id) AS venue_ids,
+         GROUP_CONCAT(DISTINCT ec.cohort_id) AS cohort_ids
+       FROM exams e
+       LEFT JOIN exam_venue_allocations eva ON eva.exam_id = e.id
+       LEFT JOIN exam_cohorts ec ON ec.exam_id = e.id
+       WHERE e.exam_date = ? AND e.status = 'SCHEDULED'
+       GROUP BY e.id`,
+      [effectiveDate]
+    )
+  ])
+  const otherEntries = timetableRows.filter(row => Number(row.id) !== Number(timetableEntryId))
+  const currentEntry = timetableRows.find(row => Number(row.id) === Number(timetableEntryId))
+  const existingEvents = [
+    ...otherEntries.map(row => ({ ...row, venue_ids: String(row.venue_id), cohort_ids: row.cohort_ids || String(row.cohort_id || '') })),
+    ...examRows.map(row => ({ ...row, venue_ids: row.venue_ids || '', cohort_ids: row.cohort_ids || '' }))
+  ]
+  const validation = validateTimetableEntry({
+    venueId: newVenueId,
+    lecturerId: value('lecturerId', 'lecturer_id'),
+    cohortId: value('cohortId', 'cohort_id'),
+    cohortIds: currentEntry?.cohort_ids
+      ? String(currentEntry.cohort_ids).split(',').map(Number)
+      : [Number(value('cohortId', 'cohort_id'))],
+    dayOfWeek,
     startTime: newStartTime,
     endTime: newEndTime,
+    existingEvents,
     venueBlocks: blocks.map(block => ({
       ...block,
       start_time: block.start_time,
@@ -111,15 +195,16 @@ export const createScheduleOverride = async ({
   const record = await createRow('schedule_overrides', {
     timetable_entry_id: timetableEntryId,
     effective_date: effectiveDate,
-    original_venue_id: originalVenueId ?? timetableEntry.venue_id,
+    original_venue_id: value('venueId', 'venue_id'),
     new_venue_id: newVenueId,
-    original_start_time: originalStartTime ?? timetableEntry.start_time,
+    original_start_time: value('startTime', 'start_time'),
     new_start_time: newStartTime,
-    original_end_time: originalEndTime ?? timetableEntry.end_time,
+    original_end_time: value('endTime', 'end_time'),
     new_end_time: newEndTime,
     reason,
-    status: status || 'PENDING',
-    created_by: createdBy
+    status: 'APPROVED',
+    created_by: createdBy,
+    approved_by: createdBy
   })
 
   emitSocketEvent('timetable:override_created', record)

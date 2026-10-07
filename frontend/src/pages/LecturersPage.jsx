@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import ConfirmActionModal from '../components/ConfirmActionModal'
+import PaginationControls from '../components/PaginationControls'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -9,30 +10,25 @@ const toArray = value => {
   return []
 }
 
-const emptyLecturer = {
-  first_name: '',
-  last_name: '',
-  staff_number: '',
-  department_id: '',
+const emptyAcademicInfo = {
   title: '',
-  employment_status: 'ACTIVE'
+  facultyIds: [],
+  departmentIds: [],
+  programmeIds: [],
+  unitIds: []
 }
 
 export default function LecturersPage () {
   const queryClient = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState(emptyLecturer)
-  const [formError, setFormError] = useState('')
   const [lecturerToDelete, setLecturerToDelete] = useState(null)
-
-  useEffect(() => {
-    if (!formError) return undefined
-    const timeout = setTimeout(() => setFormError(''), 5000)
-    return () => clearTimeout(timeout)
-  }, [formError])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('name')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [editingLecturer, setEditingLecturer] = useState(null)
+  const [academicInfo, setAcademicInfo] = useState(emptyAcademicInfo)
+  const [editError, setEditError] = useState('')
 
   const {
     data = [],
@@ -53,6 +49,15 @@ export default function LecturersPage () {
       return toArray(response)
     }
   })
+
+  const { data: optionsResponse, isLoading: optionsLoading } = useQuery({
+    queryKey: ['lecturer-academic-edit-options'],
+    queryFn: () => api.get('/api/auth/registration-options')
+  })
+  const options = optionsResponse?.data || {}
+  const faculties = Array.isArray(options.faculties) ? options.faculties : []
+  const programmes = Array.isArray(options.programmes) ? options.programmes : []
+  const units = Array.isArray(options.units) ? options.units : []
 
   const departmentNameMap = Object.fromEntries(
     (departments || []).map(department => [
@@ -98,18 +103,37 @@ export default function LecturersPage () {
       })
   }, [data, search, sortBy, statusFilter])
 
-  const createLecturerMutation = useMutation({
-    mutationFn: async payload => {
-      const response = await api.post('/api/academic/lecturers', payload)
-      return response?.data ?? response
+  const totalPages = Math.max(1, Math.ceil(visibleLecturers.length / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  const paginatedLecturers = visibleLecturers.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
+  const availableDepartments = departments.filter(item =>
+    academicInfo.facultyIds.includes(String(item.faculty_id ?? item.facultyId))
+  )
+  const availableProgrammes = programmes.filter(item =>
+    academicInfo.departmentIds.includes(String(item.department_id ?? item.departmentId))
+  )
+  const availableUnits = units.filter(unit =>
+    (unit.programmeIds || unit.programme_ids || []).some(id =>
+      academicInfo.programmeIds.includes(String(id))
+    )
+  )
+
+  const updateAcademicInfoMutation = useMutation({
+    mutationFn: ({ id, payload }) => api.put(`/api/academic/lecturers/${id}/academic-details`, payload),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['lecturers'] }),
+        queryClient.invalidateQueries({ queryKey: ['timetable'] }),
+        queryClient.invalidateQueries({ queryKey: ['courses'] })
+      ])
+      setEditingLecturer(null)
+      setEditError('')
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['lecturers'] })
-      setShowForm(false)
-      setForm(emptyLecturer)
-      setFormError('')
-    },
-    onError: err => setFormError(err.message || 'Unable to create lecturer.')
+    onError: error => setEditError(error.message || 'Unable to update lecturer academic information.')
   })
 
   const deleteLecturerMutation = useMutation({
@@ -119,27 +143,113 @@ export default function LecturersPage () {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['lecturers'] })
   })
 
-  const handleSubmit = event => {
-    event.preventDefault()
-
-    if (
-      !form.first_name ||
-      !form.last_name ||
-      !form.staff_number ||
-      !form.department_id
-    ) {
-      setFormError(
-        'First name, last name, staff number, and department are required.'
-      )
-      return
+  const openAcademicEditor = async lecturer => {
+    setEditError('')
+    setEditingLecturer(lecturer)
+    setAcademicInfo(emptyAcademicInfo)
+    try {
+      const response = await api.get(`/api/academic/lecturers/${lecturer.id}/academic-details`)
+      const profile = response?.data || {}
+      setAcademicInfo({
+        title: profile.title || '',
+        facultyIds: (profile.facultyIds || []).map(String),
+        departmentIds: (profile.departmentIds || []).map(String),
+        programmeIds: (profile.programmeIds || []).map(String),
+        unitIds: (profile.unitIds || []).map(String)
+      })
+    } catch (error) {
+      setEditError(error.message || 'Unable to load lecturer academic information.')
     }
+  }
 
-    createLecturerMutation.mutate({
-      ...form,
-      department_id: Number(form.department_id) || null,
-      is_active: true
+  const toggleFaculty = (id, checked) => {
+    setAcademicInfo(current => {
+      const facultyIds = checked
+        ? [...new Set([...current.facultyIds, String(id)])]
+        : current.facultyIds.filter(value => value !== String(id))
+      const departmentIds = current.departmentIds.filter(departmentId => {
+        const department = departments.find(item => String(item.id) === departmentId)
+        return department && facultyIds.includes(String(department.faculty_id ?? department.facultyId))
+      })
+      const programmeIds = current.programmeIds.filter(programmeId => {
+        const programme = programmes.find(item => String(item.id) === programmeId)
+        return programme && departmentIds.includes(String(programme.department_id ?? programme.departmentId))
+      })
+      const unitIds = current.unitIds.filter(unitId => {
+        const unit = units.find(item => String(item.id) === unitId)
+        return unit && (unit.programmeIds || unit.programme_ids || []).some(id => programmeIds.includes(String(id)))
+      })
+      return { ...current, facultyIds, departmentIds, programmeIds, unitIds }
     })
   }
+
+  const toggleDepartment = (id, checked) => {
+    setAcademicInfo(current => {
+      const departmentIds = checked
+        ? [...new Set([...current.departmentIds, String(id)])]
+        : current.departmentIds.filter(value => value !== String(id))
+      const programmeIds = current.programmeIds.filter(programmeId => {
+        const programme = programmes.find(item => String(item.id) === programmeId)
+        return programme && departmentIds.includes(String(programme.department_id ?? programme.departmentId))
+      })
+      const unitIds = current.unitIds.filter(unitId => {
+        const unit = units.find(item => String(item.id) === unitId)
+        return unit && (unit.programmeIds || unit.programme_ids || []).some(id => programmeIds.includes(String(id)))
+      })
+      return { ...current, departmentIds, programmeIds, unitIds }
+    })
+  }
+
+  const toggleProgramme = (id, checked) => {
+    setAcademicInfo(current => {
+      const programmeIds = checked
+        ? [...new Set([...current.programmeIds, String(id)])]
+        : current.programmeIds.filter(value => value !== String(id))
+      const unitIds = current.unitIds.filter(unitId => {
+        const unit = units.find(item => String(item.id) === unitId)
+        return unit && (unit.programmeIds || unit.programme_ids || []).some(value => programmeIds.includes(String(value)))
+      })
+      return { ...current, programmeIds, unitIds }
+    })
+  }
+
+  const submitAcademicInfo = event => {
+    event.preventDefault()
+    setEditError('')
+    if (!academicInfo.facultyIds.length || !academicInfo.departmentIds.length || !academicInfo.programmeIds.length || !academicInfo.unitIds.length) {
+      setEditError('Select at least one faculty, department, programme, and unit.')
+      return
+    }
+    updateAcademicInfoMutation.mutate({
+      id: editingLecturer.id,
+      payload: {
+        ...academicInfo,
+        facultyIds: academicInfo.facultyIds.map(Number),
+        departmentIds: academicInfo.departmentIds.map(Number),
+        programmeIds: academicInfo.programmeIds.map(Number),
+        unitIds: academicInfo.unitIds.map(Number)
+      }
+    })
+  }
+
+  const academicCheckboxGroup = (title, rows, field, toggle, emptyMessage) => (
+    <fieldset className='selection-container lecturer-edit-group'>
+      <legend>{title}</legend>
+      <div className='checkbox-list lecturer-edit-checkboxes'>
+        {rows.map(item => (
+          <label key={item.id} className='checkbox-option'>
+            <input
+              type='checkbox'
+              checked={academicInfo[field].includes(String(item.id))}
+              onChange={event => toggle(item.id, event.target.checked)}
+            />
+            <span>{item.code ? `${item.code} · ` : ''}{item.name || item.code}</span>
+          </label>
+        ))}
+        {!rows.length && <small>{emptyMessage}</small>}
+      </div>
+    </fieldset>
+  )
 
   return (
     <div className='page-shell'>
@@ -152,12 +262,18 @@ export default function LecturersPage () {
         <div className='toolbar-actions'>
           <input
             value={search}
-            onChange={event => setSearch(event.target.value)}
+            onChange={event => {
+              setSearch(event.target.value)
+              setPage(1)
+            }}
             placeholder='Search lecturers'
           />
           <select
             value={statusFilter}
-            onChange={event => setStatusFilter(event.target.value)}
+            onChange={event => {
+              setStatusFilter(event.target.value)
+              setPage(1)
+            }}
           >
             <option value='all'>All statuses</option>
             <option value='ACTIVE'>Active</option>
@@ -165,144 +281,27 @@ export default function LecturersPage () {
           </select>
           <select
             value={sortBy}
-            onChange={event => setSortBy(event.target.value)}
+            onChange={event => {
+              setSortBy(event.target.value)
+              setPage(1)
+            }}
           >
             <option value='name'>Sort by name</option>
             <option value='email'>Sort by email</option>
             <option value='status'>Sort by status</option>
           </select>
-          <button
-            type='button'
-            className='primary-button'
-            onClick={() => setShowForm(value => !value)}
-          >
-            {showForm ? 'Close form' : 'Add lecturer'}
-          </button>
+          <span className='lecturer-count-chip'>{visibleLecturers.length} lecturers</span>
         </div>
       </div>
 
-      {showForm && (
-        <section className='content-panel'>
-          <form className='stack-form' onSubmit={handleSubmit}>
-            <div className='form-grid'>
-              <label>
-                First name
-                <input
-                  value={form.first_name}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      first_name: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Last name
-                <input
-                  value={form.last_name}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      last_name: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Staff number
-                <input
-                  value={form.staff_number}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      staff_number: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Department
-                <select
-                  value={form.department_id}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      department_id: event.target.value
-                    }))
-                  }
-                >
-                  <option value=''>Select department</option>
-                  {(departments || []).map(department => (
-                    <option
-                      key={department.id ?? department.code}
-                      value={department.id ?? department.code}
-                    >
-                      {department.name || department.code}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Title
-                <input
-                  value={form.title}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      title: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Employment status
-                <select
-                  value={form.employment_status}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      employment_status: event.target.value
-                    }))
-                  }
-                >
-                  <option value='ACTIVE'>Active</option>
-                  <option value='INACTIVE'>Inactive</option>
-                </select>
-              </label>
-            </div>
-
-            {formError && <p className='form-error'>{formError}</p>}
-
-            <div className='toolbar-actions'>
-              <button
-                type='submit'
-                className='primary-button'
-                disabled={createLecturerMutation.isPending}
-              >
-                {createLecturerMutation.isPending
-                  ? 'Saving...'
-                  : 'Save lecturer'}
-              </button>
-              <button
-                type='button'
-                className='secondary-button'
-                onClick={() => setShowForm(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      <section className='content-panel table-panel'>
+      <section className='content-panel table-panel lecturers-panel'>
         {isLoading ? (
           <p>Loading lecturers...</p>
         ) : error ? (
           <p className='form-error'>Unable to load lecturers.</p>
         ) : (
-          <table>
+          <div className='lecturers-table-viewport'>
+          <table className='lecturers-table'>
             <thead>
               <tr>
                 <th>Name</th>
@@ -315,8 +314,8 @@ export default function LecturersPage () {
               </tr>
             </thead>
             <tbody>
-              {visibleLecturers.length ? (
-                visibleLecturers.map(item => (
+              {paginatedLecturers.length ? (
+                paginatedLecturers.map(item => (
                   <tr key={item.id ?? item.staff_number}>
                     <td>
                       {item.name ||
@@ -347,6 +346,13 @@ export default function LecturersPage () {
                     <td>
                       <button
                         type='button'
+                        className='table-action'
+                        onClick={() => openAcademicEditor(item)}
+                      >
+                        Edit academic info
+                      </button>
+                      <button
+                        type='button'
                         className='table-action danger'
                         onClick={() => setLecturerToDelete(item)}
                         disabled={deleteLecturerMutation.isPending}
@@ -363,8 +369,60 @@ export default function LecturersPage () {
               )}
             </tbody>
           </table>
+          </div>
+        )}
+        {!isLoading && !error && (
+          <PaginationControls
+            page={currentPage}
+            pageSize={pageSize}
+            totalItems={visibleLecturers.length}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={size => {
+              setPageSize(size)
+              setPage(1)
+            }}
+          />
         )}
       </section>
+      {editingLecturer && (
+        <div className='profile-modal-backdrop' role='presentation'>
+          <section className='profile-modal content-panel lecturer-edit-modal' role='dialog' aria-modal='true' aria-labelledby='lecturer-edit-title'>
+            <p className='eyebrow'>Lecturer registration details</p>
+            <h2 id='lecturer-edit-title'>Edit academic information</h2>
+            <p className='muted'>Update academic selections captured during registration. Removing a parent automatically clears its dependent selections.</p>
+            {optionsLoading ? <p>Loading academic options…</p> : (
+              <form className='stack-form' onSubmit={submitAcademicInfo}>
+                <label>Academic title
+                  <input
+                    value={academicInfo.title}
+                    onChange={event => setAcademicInfo(current => ({ ...current, title: event.target.value }))}
+                    placeholder='e.g. Dr, Professor'
+                  />
+                </label>
+                <div className='lecturer-edit-selections'>
+                  {academicCheckboxGroup('Faculties', faculties, 'facultyIds', toggleFaculty, 'No faculties configured.')}
+                  {academicCheckboxGroup('Departments', availableDepartments, 'departmentIds', toggleDepartment, 'Select a faculty first.')}
+                  {academicCheckboxGroup('Programmes', availableProgrammes, 'programmeIds', toggleProgramme, 'Select a department first.')}
+                  {academicCheckboxGroup('Units', availableUnits, 'unitIds', (id, checked) => setAcademicInfo(current => ({
+                    ...current,
+                    unitIds: checked
+                      ? [...new Set([...current.unitIds, String(id)])]
+                      : current.unitIds.filter(value => value !== String(id))
+                  })), 'Select a programme first.')}
+                </div>
+                {editError && <p className='form-error'>{editError}</p>}
+                <div className='toolbar-actions'>
+                  <button type='submit' className='primary-button' disabled={updateAcademicInfoMutation.isPending || optionsLoading}>
+                    {updateAcademicInfoMutation.isPending ? 'Saving…' : 'Save academic info'}
+                  </button>
+                  <button type='button' className='secondary-button' onClick={() => setEditingLecturer(null)}>Cancel</button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
       {lecturerToDelete && (
         <ConfirmActionModal
           title='Delete lecturer?'

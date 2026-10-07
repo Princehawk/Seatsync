@@ -20,6 +20,7 @@ import StudentsPage from './pages/StudentsPage'
 import LecturersPage from './pages/LecturersPage'
 import AcademicSetupPage from './pages/AcademicSetupPage'
 import ReportsPage from './pages/ReportsPage'
+import LecturerProfilePage from './pages/LecturerProfilePage'
 import { api } from './api/client'
 import './App.css'
 import ProfileCompletionModal from './components/ProfileCompletionModal'
@@ -56,14 +57,15 @@ function ProtectedLayout () {
         <Routes>
           <Route path='/dashboard' element={<DashboardPage />} />
           <Route path='/timetable' element={<TimetablePage />} />
-          <Route path='/venues' element={<VenuesPage />} />
-          <Route path='/courses' element={<CoursesPage />} />
-          <Route path='/cohorts' element={<CohortsPage />} />
-          <Route path='/students' element={<StudentsPage />} />
-          <Route path='/lecturers' element={<LecturersPage />} />
-          <Route path='/academic/setup' element={<AcademicSetupPage />} />
-          <Route path='/reports' element={<ReportsPage />} />
-          <Route path='/exams' element={<ExamsPage />} />
+          <Route path='/venues' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP']}><VenuesPage /></RoleProtectedRoute>} />
+          <Route path='/courses' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER']}><CoursesPage /></RoleProtectedRoute>} />
+          <Route path='/cohorts' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'CLASS_REP']}><CohortsPage /></RoleProtectedRoute>} />
+          <Route path='/students' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><StudentsPage /></RoleProtectedRoute>} />
+          <Route path='/lecturers' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><LecturersPage /></RoleProtectedRoute>} />
+          <Route path='/academic/setup' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><AcademicSetupPage /></RoleProtectedRoute>} />
+          <Route path='/reports' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><ReportsPage /></RoleProtectedRoute>} />
+          <Route path='/lecturer/profile' element={<RoleProtectedRoute allowedRoles={['LECTURER']}><LecturerProfilePage /></RoleProtectedRoute>} />
+          <Route path='/exams' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP']}><ExamsPage /></RoleProtectedRoute>} />
           <Route path='/notifications' element={<NotificationsPage />} />
           <Route
             path='/admin/users'
