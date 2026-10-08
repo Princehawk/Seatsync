@@ -15,7 +15,9 @@ const field = (record, camelCase, snakeCase) =>
 const ids = (record, camelCase, snakeCase, fallbackCamel, fallbackSnake) => {
   const value = field(record, camelCase, snakeCase)
   const selected =
-    value === undefined || value === null || value === '' ||
+    value === undefined ||
+    value === null ||
+    value === '' ||
     (Array.isArray(value) && value.length === 0)
       ? field(record, fallbackCamel, fallbackSnake)
       : value
@@ -25,24 +27,46 @@ const ids = (record, camelCase, snakeCase, fallbackCamel, fallbackSnake) => {
 }
 
 const sameId = (left, right) =>
-  left !== undefined && left !== null && right !== undefined && right !== null &&
+  left !== undefined &&
+  left !== null &&
+  right !== undefined &&
+  right !== null &&
   Number(left) === Number(right)
 
-const hasResource = (event, singularCamel, singularSnake, pluralCamel, pluralSnake, id) =>
+const hasResource = (
+  event,
+  singularCamel,
+  singularSnake,
+  pluralCamel,
+  pluralSnake,
+  id
+) =>
   ids(event, pluralCamel, pluralSnake, singularCamel, singularSnake).some(
     eventId => sameId(eventId, id)
   )
 
 const normalizedDay = value => {
-  const day = String(value || '').trim().toUpperCase()
+  const day = String(value || '')
+    .trim()
+    .toUpperCase()
   const dayNames = {
-    MON: 'MONDAY', MONDAY: 'MONDAY',
-    TUE: 'TUESDAY', TUES: 'TUESDAY', TUESDAY: 'TUESDAY',
-    WED: 'WEDNESDAY', WEDNESDAY: 'WEDNESDAY',
-    THU: 'THURSDAY', THUR: 'THURSDAY', THURS: 'THURSDAY', THURSDAY: 'THURSDAY',
-    FRI: 'FRIDAY', FRIDAY: 'FRIDAY',
-    SAT: 'SATURDAY', SATURDAY: 'SATURDAY',
-    SUN: 'SUNDAY', SUNDAY: 'SUNDAY'
+    MON: 'MONDAY',
+    MONDAY: 'MONDAY',
+    TUE: 'TUESDAY',
+    TUES: 'TUESDAY',
+    TUESDAY: 'TUESDAY',
+    WED: 'WEDNESDAY',
+    WEDNESDAY: 'WEDNESDAY',
+    THU: 'THURSDAY',
+    THUR: 'THURSDAY',
+    THURS: 'THURSDAY',
+    THURSDAY: 'THURSDAY',
+    FRI: 'FRIDAY',
+    FRIDAY: 'FRIDAY',
+    SAT: 'SATURDAY',
+    SATURDAY: 'SATURDAY',
+    SUN: 'SUNDAY',
+    SUNDAY: 'SUNDAY'
   }
   return dayNames[day] || day
 }
@@ -66,7 +90,17 @@ export const checkVenueConflict = ({
 }) => {
   const conflicts = []
   for (const event of existingEvents) {
-    if (!hasResource(event, 'venueId', 'venue_id', 'venueIds', 'venue_ids', venueId)) continue
+    if (
+      !hasResource(
+        event,
+        'venueId',
+        'venue_id',
+        'venueIds',
+        'venue_ids',
+        venueId
+      )
+    )
+      continue
     if (!isSameDay(dayOfWeek, event)) continue
     const overlapsEvent = overlaps(
       toMinutes(startTime),
@@ -137,7 +171,11 @@ export const checkCohortConflict = ({
 }) => {
   const conflicts = []
   for (const event of existingEvents) {
-    if (String(field(event, 'eventType', 'event_type') || '').toUpperCase() === 'EXAM') continue
+    if (
+      String(field(event, 'eventType', 'event_type') || '').toUpperCase() ===
+      'EXAM'
+    )
+      continue
     const sharesCohort = cohortIds.some(id =>
       hasResource(event, 'cohortId', 'cohort_id', 'cohortIds', 'cohort_ids', id)
     )

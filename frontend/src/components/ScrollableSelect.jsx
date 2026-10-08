@@ -12,7 +12,9 @@ export default function ScrollableSelect ({
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const rootRef = useRef(null)
-  const selected = options.find(option => String(option.value) === String(value))
+  const selected = options.find(
+    option => String(option.value) === String(value)
+  )
   const filteredOptions = options.filter(option =>
     `${option.label} ${option.searchText || ''}`
       .toLowerCase()
@@ -56,7 +58,11 @@ export default function ScrollableSelect ({
             aria-label={`Search ${ariaLabel.toLowerCase()}`}
             onChange={event => setSearch(event.target.value)}
           />
-          <div className='scrollable-select-options' role='listbox' aria-label={ariaLabel}>
+          <div
+            className='scrollable-select-options'
+            role='listbox'
+            aria-label={ariaLabel}
+          >
             {placeholder && (
               <button
                 type='button'
@@ -86,7 +92,9 @@ export default function ScrollableSelect ({
                 {option.label}
               </button>
             ))}
-            {!filteredOptions.length && <p className='scrollable-select-empty'>No matching options.</p>}
+            {!filteredOptions.length && (
+              <p className='scrollable-select-empty'>No matching options.</p>
+            )}
           </div>
         </div>
       )}

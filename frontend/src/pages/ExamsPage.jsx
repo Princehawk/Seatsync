@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { formatDateOnly, weekdayFromDateOnly } from '../utils/dateOnly'
 import ScrollableSelect from '../components/ScrollableSelect'
+import PaginationControls from '../components/PaginationControls'
 import { useAuth } from '../context/AuthContext'
 import usePendingScheduleDrafts from '../hooks/usePendingScheduleDrafts'
 
@@ -46,24 +47,40 @@ const emptyExam = {
 }
 
 export default function ExamsPage () {
-  const queryClient = useQueryClient()
   const { user } = useAuth()
   const pendingSchedule = usePendingScheduleDrafts()
   const canManageExams = (user?.roles || []).includes('ADMIN')
+  const pendingExamDrafts = pendingSchedule.drafts.filter(draft =>
+    ['exam', 'exam_update'].includes(draft.kind)
+  )
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const examEditorRef = useRef(null)
   const [editingExam, setEditingExam] = useState(null)
   const [form, setForm] = useState(emptyExam)
   const [formError, setFormError] = useState('')
   const [capacityWarning, setCapacityWarning] = useState(null)
   const [sortBy, setSortBy] = useState('date')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
 
   useEffect(() => {
     if (!formError) return undefined
     const timeout = setTimeout(() => setFormError(''), 5000)
     return () => clearTimeout(timeout)
   }, [formError])
+
+  useEffect(() => {
+    if (!showForm) return undefined
+    const frame = requestAnimationFrame(() =>
+      examEditorRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      })
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [editingExam, showForm])
 
   const {
     data = [],
@@ -152,17 +169,37 @@ export default function ExamsPage () {
       const matchesProgramme =
         !form.programme_ids.length ||
         programmeIds.some(id => form.programme_ids.includes(String(id)))
-      return matchesYear && matchesSemester && matchesDepartment && matchesProgramme
+      return (
+        matchesYear && matchesSemester && matchesDepartment && matchesProgramme
+      )
     })
-  }, [courses, form.department_ids, form.programme_ids, form.semester_id, form.unit_year_level])
+  }, [
+    courses,
+    form.department_ids,
+    form.programme_ids,
+    form.semester_id,
+    form.unit_year_level
+  ])
 
-  const eligibleDepartments = useMemo(() => departments.filter(department =>
-    form.faculty_ids.includes(String(department.faculty_id ?? department.facultyId))
-  ), [departments, form.faculty_ids])
+  const eligibleDepartments = useMemo(
+    () =>
+      departments.filter(department =>
+        form.faculty_ids.includes(
+          String(department.faculty_id ?? department.facultyId)
+        )
+      ),
+    [departments, form.faculty_ids]
+  )
 
-  const eligibleProgrammes = useMemo(() => programmes.filter(programme =>
-    form.department_ids.includes(String(programme.department_id ?? programme.departmentId))
-  ), [form.department_ids, programmes])
+  const eligibleProgrammes = useMemo(
+    () =>
+      programmes.filter(programme =>
+        form.department_ids.includes(
+          String(programme.department_id ?? programme.departmentId)
+        )
+      ),
+    [form.department_ids, programmes]
+  )
 
   const eligibleSemesters = useMemo(() => {
     if (!form.academic_year_id) return []
@@ -181,19 +218,40 @@ export default function ExamsPage () {
           String(form.academic_year_id)
       const matchesDepartment =
         !form.department_ids.length ||
-        form.department_ids.includes(String(
-          cohort.department_id ?? cohort.departmentId ??
-          programmes.find(item => String(item.id) === String(cohort.programme_id ?? cohort.programmeId))?.department_id ??
-          programmes.find(item => String(item.id) === String(cohort.programme_id ?? cohort.programmeId))?.departmentId
-        ))
+        form.department_ids.includes(
+          String(
+            cohort.department_id ??
+              cohort.departmentId ??
+              programmes.find(
+                item =>
+                  String(item.id) ===
+                  String(cohort.programme_id ?? cohort.programmeId)
+              )?.department_id ??
+              programmes.find(
+                item =>
+                  String(item.id) ===
+                  String(cohort.programme_id ?? cohort.programmeId)
+              )?.departmentId
+          )
+        )
       const matchesProgramme =
-        !form.programme_ids.length || form.programme_ids.includes(String(cohort.programme_id ?? cohort.programmeId))
+        !form.programme_ids.length ||
+        form.programme_ids.includes(
+          String(cohort.programme_id ?? cohort.programmeId)
+        )
       return matchesYear && matchesDepartment && matchesProgramme
     })
-  }, [cohorts, form.academic_year_id, form.department_ids, form.programme_ids, programmes])
+  }, [
+    cohorts,
+    form.academic_year_id,
+    form.department_ids,
+    form.programme_ids,
+    programmes
+  ])
 
   const createExamMutation = useMutation({
-    mutationFn: async payload => pendingSchedule.stageDraft('exam', payload, user?.id),
+    mutationFn: async payload =>
+      pendingSchedule.stageDraft('exam', payload, user?.id),
     onSuccess: () => {
       setShowForm(false)
       setForm(emptyExam)
@@ -202,52 +260,152 @@ export default function ExamsPage () {
     onError: err => setFormError(err.message || 'Unable to stage exam.')
   })
 
-  const updateExamMutation = useMutation({
-    mutationFn: ({ id, payload }) => api.put(`/api/exams/${id}`, payload),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['exams'] })
+  const stageExamEditMutation = useMutation({
+    mutationFn: ({ id, payload }) =>
+      pendingSchedule.stageDraft(
+        'exam_update',
+        { ...payload, exam_id: Number(id) },
+        user?.id
+      ),
+    onSuccess: () => {
       setShowForm(false)
       setEditingExam(null)
       setForm(emptyExam)
       setFormError('')
     },
-    onError: error => setFormError(error.message || 'Unable to update exam.')
+    onError: error =>
+      setFormError(error.message || 'Unable to stage exam changes.')
   })
 
-  const editExam = exam => {
-    const unit = courses.find(item => String(item.id) === String(exam.course_id ?? exam.courseId))
-    const departmentIds = (unit?.departmentIds || unit?.department_ids || [unit?.department_id ?? unit?.departmentId])
-      .filter(value => value !== undefined && value !== null).map(String)
-    const programmeIds = (unit?.programmeIds || unit?.programme_ids || []).map(String)
+  const updateStagedExamMutation = useMutation({
+    mutationFn: ({ id, payload }) => pendingSchedule.updateDraft(id, payload),
+    onSuccess: () => {
+      setShowForm(false)
+      setEditingExam(null)
+      setForm(emptyExam)
+      setFormError('')
+    },
+    onError: error => setFormError(error.message || 'Unable to update draft.')
+  })
+
+  const editExam = (exam, pendingDraftId = null, pendingDraftKind = 'exam') => {
+    const values = pendingDraftId ? exam.payload : exam
+    const unit = courses.find(
+      item => String(item.id) === String(values.course_id ?? values.courseId)
+    )
+    const departmentIds = (
+      unit?.departmentIds ||
+      unit?.department_ids || [unit?.department_id ?? unit?.departmentId]
+    )
+      .filter(value => value !== undefined && value !== null)
+      .map(String)
+    const programmeIds = (unit?.programmeIds || unit?.programme_ids || []).map(
+      String
+    )
     const facultyIds = departments
       .filter(item => departmentIds.includes(String(item.id)))
       .map(item => String(item.faculty_id ?? item.facultyId))
+    const cohortRows = values.cohort_allocations || exam.cohortDetails || []
     const cohortAllocations = Object.fromEntries(
-      (exam.cohortDetails || []).map(item => [String(item.id), String(item.studentCount || '')])
+      cohortRows.map(item => [
+        String(item.cohortId ?? item.cohort_id ?? item.id),
+        String(item.studentCount ?? item.student_count ?? '')
+      ])
     )
-    const venueAllocations = (exam.venueDetails || []).map(item => ({
-      venueId: String(item.id),
-      allocatedCapacity: String(item.capacity || '')
+    const venueRows = values.venue_allocations || exam.venueDetails || []
+    const venueAllocations = venueRows.map(item => ({
+      venueId: String(item.venueId ?? item.venue_id ?? item.id),
+      allocatedCapacity: String(
+        item.allocatedCapacity ?? item.allocated_capacity ?? item.capacity ?? ''
+      )
     }))
     setForm({
-      academic_year_id: String(exam.academic_year_id ?? exam.academicYearId ?? ''),
-      semester_id: String(exam.semester_id ?? exam.semesterId ?? ''),
+      academic_year_id: String(
+        values.academic_year_id ?? values.academicYearId ?? ''
+      ),
+      semester_id: String(values.semester_id ?? values.semesterId ?? ''),
       faculty_ids: [...new Set(facultyIds)],
       unit_year_level: String(unit?.year_level ?? unit?.yearLevel ?? ''),
       department_ids: departmentIds,
       programme_ids: programmeIds,
-      course_id: String(exam.course_id ?? exam.courseId ?? ''),
-      exam_date: String(exam.exam_date || '').slice(0, 10),
-      start_time: String(exam.start_time || '09:00').slice(0, 5),
-      end_time: String(exam.end_time || '11:00').slice(0, 5),
-      duration_minutes: exam.duration_minutes || 120,
-      instructions: exam.instructions || '',
+      course_id: String(values.course_id ?? values.courseId ?? ''),
+      exam_date: String(values.exam_date ?? values.examDate ?? '').slice(0, 10),
+      start_time: String(
+        values.start_time ?? values.startTime ?? '09:00'
+      ).slice(0, 5),
+      end_time: String(values.end_time ?? values.endTime ?? '11:00').slice(
+        0,
+        5
+      ),
+      duration_minutes:
+        values.duration_minutes ?? values.durationMinutes ?? 120,
+      instructions: values.instructions || '',
       cohort_allocations: cohortAllocations,
-      venue_allocations: venueAllocations.length ? venueAllocations : [{ venueId: '', allocatedCapacity: '' }]
+      venue_allocations: venueAllocations.length
+        ? venueAllocations
+        : [{ venueId: '', allocatedCapacity: '' }]
     })
-    setEditingExam(exam)
+    setEditingExam(
+      pendingDraftId
+        ? {
+            pendingDraftId,
+            pendingDraftKind,
+            examId: values.exam_id ?? values.examId
+          }
+        : exam
+    )
     setFormError('')
     setShowForm(true)
+  }
+
+  const stagedExamDescription = draft => {
+    const payload = draft.payload || {}
+    const unit = courses.find(
+      item =>
+        String(item.id) === String(payload.course_id ?? payload.courseId ?? '')
+    )
+    const cohortNames = (payload.cohort_allocations || [])
+      .map(allocation => {
+        const id = allocation.cohortId ?? allocation.cohort_id
+        return (
+          cohorts.find(item => String(item.id) === String(id))?.name ||
+          allocation.cohortName ||
+          `Cohort ${id}`
+        )
+      })
+      .join(', ')
+    const venueNames = (payload.venue_allocations || [])
+      .map(allocation => {
+        const id = allocation.venueId ?? allocation.venue_id
+        const venue = venues.find(item => String(item.id) === String(id))
+        return venue
+          ? `${venue.code ? `${venue.code} · ` : ''}${venue.name}`
+          : `Venue ${id}`
+      })
+      .join(', ')
+    const unitLabel = unit
+      ? `${unit.code ? `${unit.code} · ` : ''}${unit.name || ''}`.trim()
+      : `Unit ${payload.course_id ?? payload.courseId ?? '?'}`
+    const yearName = academicYears.find(
+      item =>
+        String(item.id) ===
+        String(payload.academic_year_id ?? payload.academicYearId ?? '')
+    )?.name
+    const semesterName = semesters.find(
+      item =>
+        String(item.id) ===
+        String(payload.semester_id ?? payload.semesterId ?? '')
+    )?.name
+    const date = payload.exam_date ?? payload.examDate
+    return `${
+      payload.exam_id ? `Exam #${payload.exam_id} changes · ` : ''
+    }${unitLabel} · ${yearName || 'Year'} / ${semesterName || 'Semester'} · ${
+      cohortNames || 'No cohorts'
+    } · ${venueNames || 'No venues'} · ${examDay(date)}, ${formatExamDate(
+      date
+    )} (${payload.start_time ?? payload.startTime}–${
+      payload.end_time ?? payload.endTime
+    })`
   }
 
   const toggleFaculty = (facultyId, checked) => {
@@ -257,24 +415,58 @@ export default function ExamsPage () {
         : current.faculty_ids.filter(id => id !== String(facultyId))
       const department_ids = current.department_ids.filter(id => {
         const department = departments.find(item => String(item.id) === id)
-        return department && faculty_ids.includes(String(department.faculty_id ?? department.facultyId))
+        return (
+          department &&
+          faculty_ids.includes(
+            String(department.faculty_id ?? department.facultyId)
+          )
+        )
       })
       const programme_ids = current.programme_ids.filter(id => {
         const programme = programmes.find(item => String(item.id) === id)
-        return programme && department_ids.includes(String(programme.department_id ?? programme.departmentId))
+        return (
+          programme &&
+          department_ids.includes(
+            String(programme.department_id ?? programme.departmentId)
+          )
+        )
       })
-      const allowedCohorts = new Set(cohorts.filter(cohort => programme_ids.includes(String(cohort.programme_id ?? cohort.programmeId))).map(cohort => String(cohort.id)))
-      const cohort_allocations = Object.fromEntries(Object.entries(current.cohort_allocations).filter(([id]) => allowedCohorts.has(id)))
-      const selectedUnit = courses.find(item => String(item.id) === String(current.course_id))
-      const selectedUnitProgrammes = (selectedUnit?.programmeIds || selectedUnit?.programme_ids || []).map(String)
+      const allowedCohorts = new Set(
+        cohorts
+          .filter(cohort =>
+            programme_ids.includes(
+              String(cohort.programme_id ?? cohort.programmeId)
+            )
+          )
+          .map(cohort => String(cohort.id))
+      )
+      const cohort_allocations = Object.fromEntries(
+        Object.entries(current.cohort_allocations).filter(([id]) =>
+          allowedCohorts.has(id)
+        )
+      )
+      const selectedUnit = courses.find(
+        item => String(item.id) === String(current.course_id)
+      )
+      const selectedUnitProgrammes = (
+        selectedUnit?.programmeIds ||
+        selectedUnit?.programme_ids ||
+        []
+      ).map(String)
       return {
         ...current,
         faculty_ids,
         department_ids,
         programme_ids,
         cohort_allocations,
-        course_id: selectedUnitProgrammes.some(id => programme_ids.includes(id)) ? current.course_id : '',
-        unit_year_level: selectedUnitProgrammes.some(id => programme_ids.includes(id)) ? current.unit_year_level : ''
+        course_id: selectedUnitProgrammes.some(id => programme_ids.includes(id))
+          ? current.course_id
+          : '',
+        unit_year_level: selectedUnitProgrammes.some(id =>
+          programme_ids.includes(id)
+        )
+          ? current.unit_year_level
+          : ''
       }
     })
   }
@@ -286,18 +478,47 @@ export default function ExamsPage () {
         : current.department_ids.filter(id => id !== String(departmentId))
       const programme_ids = current.programme_ids.filter(id => {
         const programme = programmes.find(item => String(item.id) === id)
-        return programme && department_ids.includes(String(programme.department_id ?? programme.departmentId))
+        return (
+          programme &&
+          department_ids.includes(
+            String(programme.department_id ?? programme.departmentId)
+          )
+        )
       })
-      const selectedUnit = courses.find(item => String(item.id) === String(current.course_id))
-      const selectedUnitProgrammes = (selectedUnit?.programmeIds || selectedUnit?.programme_ids || []).map(String)
-      const cohortIds = new Set(cohorts.filter(cohort => programme_ids.includes(String(cohort.programme_id ?? cohort.programmeId))).map(cohort => String(cohort.id)))
+      const selectedUnit = courses.find(
+        item => String(item.id) === String(current.course_id)
+      )
+      const selectedUnitProgrammes = (
+        selectedUnit?.programmeIds ||
+        selectedUnit?.programme_ids ||
+        []
+      ).map(String)
+      const cohortIds = new Set(
+        cohorts
+          .filter(cohort =>
+            programme_ids.includes(
+              String(cohort.programme_id ?? cohort.programmeId)
+            )
+          )
+          .map(cohort => String(cohort.id))
+      )
       return {
         ...current,
         department_ids,
         programme_ids,
-        cohort_allocations: Object.fromEntries(Object.entries(current.cohort_allocations).filter(([id]) => cohortIds.has(id))),
-        course_id: selectedUnitProgrammes.some(id => programme_ids.includes(id)) ? current.course_id : '',
-        unit_year_level: selectedUnitProgrammes.some(id => programme_ids.includes(id)) ? current.unit_year_level : ''
+        cohort_allocations: Object.fromEntries(
+          Object.entries(current.cohort_allocations).filter(([id]) =>
+            cohortIds.has(id)
+          )
+        ),
+        course_id: selectedUnitProgrammes.some(id => programme_ids.includes(id))
+          ? current.course_id
+          : '',
+        unit_year_level: selectedUnitProgrammes.some(id =>
+          programme_ids.includes(id)
+        )
+          ? current.unit_year_level
+          : ''
       }
     })
   }
@@ -307,14 +528,34 @@ export default function ExamsPage () {
       const programme_ids = checked
         ? [...new Set([...current.programme_ids, String(programmeId)])]
         : current.programme_ids.filter(id => id !== String(programmeId))
-      const cohortIds = new Set(cohorts.filter(cohort => programme_ids.includes(String(cohort.programme_id ?? cohort.programmeId))).map(cohort => String(cohort.id)))
-      const selectedUnit = courses.find(item => String(item.id) === String(current.course_id))
-      const selectedUnitProgrammes = (selectedUnit?.programmeIds || selectedUnit?.programme_ids || []).map(String)
-      const unitStillAvailable = selectedUnitProgrammes.some(id => programme_ids.includes(id))
+      const cohortIds = new Set(
+        cohorts
+          .filter(cohort =>
+            programme_ids.includes(
+              String(cohort.programme_id ?? cohort.programmeId)
+            )
+          )
+          .map(cohort => String(cohort.id))
+      )
+      const selectedUnit = courses.find(
+        item => String(item.id) === String(current.course_id)
+      )
+      const selectedUnitProgrammes = (
+        selectedUnit?.programmeIds ||
+        selectedUnit?.programme_ids ||
+        []
+      ).map(String)
+      const unitStillAvailable = selectedUnitProgrammes.some(id =>
+        programme_ids.includes(id)
+      )
       return {
         ...current,
         programme_ids,
-        cohort_allocations: Object.fromEntries(Object.entries(current.cohort_allocations).filter(([id]) => cohortIds.has(id))),
+        cohort_allocations: Object.fromEntries(
+          Object.entries(current.cohort_allocations).filter(([id]) =>
+            cohortIds.has(id)
+          )
+        ),
         course_id: unitStillAvailable ? current.course_id : '',
         unit_year_level: unitStillAvailable ? current.unit_year_level : ''
       }
@@ -324,7 +565,13 @@ export default function ExamsPage () {
   const filteredRows = useMemo(() => {
     return [...(data || [])]
       .filter(item => {
-        const text = `${item.course_id || item.courseId || ''} ${
+        const text = `${item.unitCode || item.unit_code || ''} ${
+          item.unitName || item.unit_name || ''
+        } ${item.programmes || ''} ${(item.cohortDetails || [])
+          .map(cohort => cohort.name)
+          .join(' ')} ${(item.venueDetails || [])
+          .map(venue => venue.name)
+          .join(' ')} ${item.course_id || item.courseId || ''} ${
           item.venue_id || item.venueId || ''
         }`.toLowerCase()
         const status = item.status || 'SCHEDULED'
@@ -352,6 +599,13 @@ export default function ExamsPage () {
       })
   }, [data, search, sortBy, statusFilter])
 
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  const visibleRows = filteredRows.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
   const handleSubmit = event => {
     event.preventDefault()
 
@@ -373,6 +627,10 @@ export default function ExamsPage () {
     const today = todayInputDate()
     if (form.exam_date < today) {
       setFormError('Exam date cannot be in the past.')
+      return
+    }
+    if (form.start_time >= form.end_time) {
+      setFormError('Exam end time must be later than its start time.')
       return
     }
 
@@ -401,6 +659,13 @@ export default function ExamsPage () {
 
     if (!cohortAllocations.length) {
       setFormError('Select at least one cohort with students.')
+      return
+    }
+    if (
+      new Set(cohortAllocations.map(item => String(item.cohortId))).size !==
+      cohortAllocations.length
+    ) {
+      setFormError('Each cohort can only be added once to an exam.')
       return
     }
 
@@ -434,11 +699,24 @@ export default function ExamsPage () {
       )
       return
     }
+    if (
+      new Set(venueAllocations.map(item => String(item.venueId))).size !==
+      venueAllocations.length
+    ) {
+      setFormError('Each venue can only be added once to an exam.')
+      return
+    }
 
     const allocatedStudents = venueAllocations.reduce(
       (total, allocation) => total + allocation.studentCount,
       0
     )
+    if (allocatedStudents < totalStudents) {
+      setFormError(
+        `Venue allocations cover ${allocatedStudents} students, but the selected cohorts contain ${totalStudents}.`
+      )
+      return
+    }
 
     const overCapacityVenue = venueAllocations.find(allocation => {
       const venue = venues.find(
@@ -471,8 +749,16 @@ export default function ExamsPage () {
       venue_allocations: venueAllocations
     }
 
-    if (editingExam) {
-      updateExamMutation.mutate({ id: editingExam.id, payload })
+    if (editingExam?.pendingDraftId) {
+      updateStagedExamMutation.mutate({
+        id: editingExam.pendingDraftId,
+        payload:
+          editingExam.pendingDraftKind === 'exam_update'
+            ? { ...payload, exam_id: Number(editingExam.examId) }
+            : payload
+      })
+    } else if (editingExam) {
+      stageExamEditMutation.mutate({ id: editingExam.id, payload })
     } else {
       createExamMutation.mutate(payload)
     }
@@ -487,49 +773,144 @@ export default function ExamsPage () {
         </div>
 
         <div className='toolbar-actions'>
-          {canManageExams && pendingSchedule.drafts.some(draft => draft.kind === 'exam') && (
-            <button type='button' className='primary-button' disabled={pendingSchedule.isPublishing} onClick={() => pendingSchedule.publishDrafts(pendingSchedule.drafts).catch(() => {})}>
-              {pendingSchedule.isPublishing ? 'Publishing…' : `Publish ${pendingSchedule.drafts.length} pending item${pendingSchedule.drafts.length === 1 ? '' : 's'}`}
+          {canManageExams && pendingExamDrafts.length > 0 && (
+            <button
+              type='button'
+              className='primary-button'
+              disabled={pendingSchedule.isPublishing}
+              onClick={() =>
+                pendingSchedule.publishDrafts(pendingExamDrafts).catch(() => {})
+              }
+            >
+              {pendingSchedule.isPublishing
+                ? 'Publishing…'
+                : `Publish ${pendingExamDrafts.length} pending exam${
+                    pendingExamDrafts.length === 1 ? '' : 's'
+                  }`}
             </button>
           )}
-          {canManageExams && <button
-            type='button'
-            className='primary-button'
-            onClick={() => {
-              if (showForm) {
-                setShowForm(false)
-                setEditingExam(null)
-                setForm(emptyExam)
-              } else {
-                setShowForm(true)
-                setEditingExam(null)
-                setForm(emptyExam)
-              }
-            }}
-          >
-            {showForm ? 'Close form' : 'Add exam'}
-          </button>}
+          {canManageExams && (
+            <button
+              type='button'
+              className='primary-button'
+              onClick={() => {
+                if (showForm) {
+                  setShowForm(false)
+                  setEditingExam(null)
+                  setForm(emptyExam)
+                } else {
+                  setShowForm(true)
+                  setEditingExam(null)
+                  setForm(emptyExam)
+                }
+              }}
+            >
+              {showForm ? 'Close form' : 'Add exam'}
+            </button>
+          )}
         </div>
       </div>
 
-      {canManageExams && pendingSchedule.drafts.length > 0 && (
+      {canManageExams && pendingExamDrafts.length > 0 && (
         <section className='content-panel pending-schedule-panel'>
-          <div className='page-header'><div><p className='eyebrow'>Draft schedule</p><h2>{pendingSchedule.drafts.length} pending item{pendingSchedule.drafts.length === 1 ? '' : 's'}</h2><p>These drafts are not visible in the published timetable until committed together.</p></div></div>
-          {pendingSchedule.drafts.map(draft => (
-            <div className='pending-schedule-row' key={draft.id}>
-              <span>{draft.kind === 'exam' ? 'Exam' : 'Timetable event'} · {draft.payload.course_id || draft.payload.courseId || 'Unit'} · {draft.payload.exam_date || draft.payload.day_of_week || draft.payload.dayOfWeek} · {draft.payload.start_time || draft.payload.startTime}–{draft.payload.end_time || draft.payload.endTime}</span>
-              <button type='button' className='table-action danger' onClick={() => pendingSchedule.removeDraft(draft.id)}>Remove</button>
+          <div className='page-header'>
+            <div>
+              <p className='eyebrow'>Draft schedule</p>
+              <h2>
+                {pendingExamDrafts.length} staged exam
+                {pendingExamDrafts.length === 1 ? '' : 's'}
+              </h2>
+              <p>
+                Review each exam and publish it individually, or publish the
+                full exam batch. Drafts remain private until published.
+              </p>
             </div>
-          ))}
-          {pendingSchedule.publishError && <p className='form-error'>{pendingSchedule.publishError}</p>}
-          <button type='button' className='primary-button' disabled={pendingSchedule.isPublishing} onClick={() => pendingSchedule.publishDrafts().catch(() => {})}>
-            {pendingSchedule.isPublishing ? 'Publishing batch…' : 'Publish all pending items'}
+          </div>
+          <div className='draft-list-scroll'>
+            {pendingExamDrafts.map(draft => (
+              <div
+                className='pending-schedule-row exam-staging-card'
+                key={draft.id}
+              >
+                <div className='staging-card-details'>
+                  <span className='staging-card-type'>
+                    {draft.kind === 'exam_update'
+                      ? 'Pending exam changes'
+                      : 'Staged exam'}
+                  </span>
+                  <strong>{stagedExamDescription(draft)}</strong>
+                  {draft.payload.instructions && (
+                    <small>{draft.payload.instructions}</small>
+                  )}
+                </div>
+                <div className='staging-card-actions'>
+                  <button
+                    type='button'
+                    className='table-action'
+                    onClick={() => editExam(draft, draft.id, draft.kind)}
+                  >
+                    Edit draft
+                  </button>
+                  <button
+                    type='button'
+                    className='primary-button'
+                    disabled={pendingSchedule.isPublishing}
+                    onClick={() =>
+                      pendingSchedule.publishDrafts([draft]).catch(() => {})
+                    }
+                  >
+                    {draft.kind === 'exam_update'
+                      ? 'Publish changes'
+                      : 'Publish this exam'}
+                  </button>
+                  <button
+                    type='button'
+                    className='table-action danger'
+                    onClick={() => pendingSchedule.removeDraft(draft.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {pendingSchedule.publishError && (
+            <p className='form-error'>{pendingSchedule.publishError}</p>
+          )}
+          <button
+            type='button'
+            className='primary-button'
+            disabled={pendingSchedule.isPublishing}
+            onClick={() =>
+              pendingSchedule.publishDrafts(pendingExamDrafts).catch(() => {})
+            }
+          >
+            {pendingSchedule.isPublishing
+              ? 'Publishing batch…'
+              : 'Publish all staged exams'}
           </button>
         </section>
       )}
 
       {showForm && canManageExams && (
-        <section className='content-panel'>
+        <section
+          className='content-panel exam-editor-section'
+          ref={examEditorRef}
+        >
+          <div className='page-header exam-editor-header'>
+            <div>
+              <p className='eyebrow'>
+                {editingExam ? 'Update assessment' : 'New assessment'}
+              </p>
+              <h2>{editingExam ? 'Edit exam' : 'Stage exam'}</h2>
+              {editingExam && !editingExam.pendingDraftId && (
+                <p className='muted'>
+                  Changes will remain pending and will not affect the published
+                  exam until an administrator publishes them.
+                </p>
+              )}
+            </div>
+          </div>
           <form className='stack-form' onSubmit={handleSubmit}>
             <div className='form-grid'>
               <label className='selection-container'>
@@ -614,7 +995,9 @@ export default function ExamsPage () {
                         type='checkbox'
                         disabled={!form.semester_id}
                         checked={form.faculty_ids.includes(String(faculty.id))}
-                        onChange={event => toggleFaculty(faculty.id, event.target.checked)}
+                        onChange={event =>
+                          toggleFaculty(faculty.id, event.target.checked)
+                        }
                       />
                       <span>{faculty.name || faculty.code}</span>
                     </label>
@@ -634,12 +1017,16 @@ export default function ExamsPage () {
                         checked={form.department_ids.includes(
                           String(department.id)
                         )}
-                        onChange={event => toggleDepartment(department.id, event.target.checked)}
+                        onChange={event =>
+                          toggleDepartment(department.id, event.target.checked)
+                        }
                       />
                       <span>{department.name || department.code}</span>
                     </label>
                   ))}
-                  {!form.faculty_ids.length && <small>Select a faculty first.</small>}
+                  {!form.faculty_ids.length && (
+                    <small>Select a faculty first.</small>
+                  )}
                 </div>
               </fieldset>
 
@@ -650,13 +1037,19 @@ export default function ExamsPage () {
                     <label key={programme.id} className='checkbox-option'>
                       <input
                         type='checkbox'
-                        checked={form.programme_ids.includes(String(programme.id))}
-                        onChange={event => toggleProgramme(programme.id, event.target.checked)}
+                        checked={form.programme_ids.includes(
+                          String(programme.id)
+                        )}
+                        onChange={event =>
+                          toggleProgramme(programme.id, event.target.checked)
+                        }
                       />
                       <span>{programme.name || programme.code}</span>
                     </label>
                   ))}
-                  {!form.department_ids.length && <small>Select a department first.</small>}
+                  {!form.department_ids.length && (
+                    <small>Select a department first.</small>
+                  )}
                 </div>
               </fieldset>
 
@@ -801,7 +1194,9 @@ export default function ExamsPage () {
                         required
                         options={(venues || []).map(venue => ({
                           value: venue.id ?? venue.name,
-                          label: `${venue.code ? `${venue.code} · ` : ''}${venue.name || venue.venue_name} (${venue.capacity || 0} seats)`,
+                          label: `${venue.code ? `${venue.code} · ` : ''}${
+                            venue.name || venue.venue_name
+                          } (${venue.capacity || 0} seats)`,
                           searchText: venue.name || venue.venue_name
                         }))}
                         placeholder='Select venue'
@@ -948,11 +1343,21 @@ export default function ExamsPage () {
               <button
                 type='submit'
                 className='primary-button'
-                disabled={createExamMutation.isPending || updateExamMutation.isPending}
+                disabled={
+                  createExamMutation.isPending ||
+                  stageExamEditMutation.isPending ||
+                  updateStagedExamMutation.isPending
+                }
               >
-                {createExamMutation.isPending || updateExamMutation.isPending
+                {createExamMutation.isPending ||
+                stageExamEditMutation.isPending ||
+                updateStagedExamMutation.isPending
                   ? 'Saving...'
-                  : editingExam ? 'Save exam changes' : 'Stage exam'}
+                  : editingExam
+                  ? editingExam.pendingDraftId
+                    ? 'Save staged exam'
+                    : 'Stage exam changes'
+                  : 'Stage exam'}
               </button>
               <button
                 type='button'
@@ -971,12 +1376,18 @@ export default function ExamsPage () {
           <input
             type='text'
             value={search}
-            onChange={event => setSearch(event.target.value)}
+            onChange={event => {
+              setSearch(event.target.value)
+              setPage(1)
+            }}
             placeholder='Search exam or unit'
           />
           <select
             value={statusFilter}
-            onChange={event => setStatusFilter(event.target.value)}
+            onChange={event => {
+              setStatusFilter(event.target.value)
+              setPage(1)
+            }}
           >
             <option value='all'>All statuses</option>
             <option value='SCHEDULED'>Scheduled</option>
@@ -1020,7 +1431,7 @@ export default function ExamsPage () {
               </thead>
               <tbody>
                 {filteredRows.length ? (
-                  filteredRows.map(item => (
+                  visibleRows.map(item => (
                     <tr key={item.id ?? `${item.exam_date}-${item.course_id}`}>
                       <td>{formatExamDate(item.exam_date)}</td>
                       <td>{examDay(item.exam_date)}</td>
@@ -1038,7 +1449,12 @@ export default function ExamsPage () {
                           )
                           .join(', ') || 'N/A'}
                       </td>
-                      <td>{item.programmes || 'All assigned'}</td>
+                      <td
+                        className='exam-programmes-cell'
+                        title={item.programmes || 'All assigned'}
+                      >
+                        <span>{item.programmes || 'All assigned'}</span>
+                      </td>
                       <td>{item.status || 'SCHEDULED'}</td>
                       <td>{item.start_time || 'TBA'}</td>
                       <td>{item.end_time || 'TBA'}</td>
@@ -1052,11 +1468,17 @@ export default function ExamsPage () {
                           .map(venue => `${venue.name} (${venue.capacity})`)
                           .join(', ') || 'N/A'}
                       </td>
-                      {canManageExams && <td>
-                        <button type='button' className='table-action' onClick={() => editExam(item)}>
-                          Edit exam
-                        </button>
-                      </td>}
+                      {canManageExams && (
+                        <td>
+                          <button
+                            type='button'
+                            className='table-action'
+                            onClick={() => editExam(item)}
+                          >
+                            Edit exam
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))
                 ) : (
@@ -1067,6 +1489,19 @@ export default function ExamsPage () {
               </tbody>
             </table>
           </div>
+        )}
+        {!isLoading && !error && (
+          <PaginationControls
+            page={currentPage}
+            pageSize={pageSize}
+            totalItems={filteredRows.length}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPageSizeChange={size => {
+              setPageSize(size)
+              setPage(1)
+            }}
+          />
         )}
       </section>
 
@@ -1093,13 +1528,33 @@ export default function ExamsPage () {
                 type='button'
                 className='primary-button'
                 onClick={() => {
-                  createExamMutation.mutate({
+                  const payload = {
                     ...capacityWarning.payload,
                     allow_capacity_override: true
-                  })
+                  }
+                  if (editingExam?.pendingDraftId) {
+                    updateStagedExamMutation.mutate({
+                      id: editingExam.pendingDraftId,
+                      payload:
+                        editingExam.pendingDraftKind === 'exam_update'
+                          ? { ...payload, exam_id: Number(editingExam.examId) }
+                          : payload
+                    })
+                  } else if (editingExam) {
+                    stageExamEditMutation.mutate({
+                      id: editingExam.id,
+                      payload
+                    })
+                  } else {
+                    createExamMutation.mutate(payload)
+                  }
                   setCapacityWarning(null)
                 }}
-                disabled={createExamMutation.isPending}
+                disabled={
+                  createExamMutation.isPending ||
+                  stageExamEditMutation.isPending ||
+                  updateStagedExamMutation.isPending
+                }
               >
                 Continue anyway
               </button>

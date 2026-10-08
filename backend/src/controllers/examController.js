@@ -1,15 +1,4 @@
-import { updateExam } from '../services/exams/examService.js'
 import { normalizeDateValue, query } from '../repositories/sqlRepository.js'
-
-export const updateExamController = async (req, res) => {
-  const result = await updateExam(req.params.id, req.body)
-  if (!result.valid) {
-    const status = result.conflicts.some(item => item.type === 'NOT_FOUND') ? 404 : 400
-    return res.status(status).json({ valid: false, conflicts: result.conflicts })
-  }
-
-  return res.json({ valid: true, data: result.data })
-}
 
 export const listExamsController = async (req, res) => {
   const rows = await query(`

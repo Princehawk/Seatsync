@@ -127,11 +127,15 @@ export default function AcademicRecordsTable ({
                 <tr key={record.id ?? record.code ?? `${title}-${index}`}>
                   {columns.map(column => {
                     const value = getColumnValue(record, column)
+                    const textValue =
+                      value === null || value === undefined || value === ''
+                        ? '—'
+                        : String(value)
                     return (
                       <td key={column.key}>
-                        {value === null || value === undefined || value === ''
-                          ? '—'
-                          : value}
+                        <span className='table-cell-value' title={textValue}>
+                          {textValue}
+                        </span>
                       </td>
                     )
                   })}

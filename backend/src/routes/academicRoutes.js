@@ -85,8 +85,16 @@ router.get(
   requireRole('ADMIN', 'LECTURER', 'STUDENT'),
   getLecturers
 )
-router.get('/lecturers/:id/academic-details', requireRole('ADMIN'), getLecturerAcademicDetails)
-router.put('/lecturers/:id/academic-details', requireRole('ADMIN'), editLecturerAcademicDetails)
+router.get(
+  '/lecturers/:id/academic-details',
+  requireRole('ADMIN'),
+  getLecturerAcademicDetails
+)
+router.put(
+  '/lecturers/:id/academic-details',
+  requireRole('ADMIN'),
+  editLecturerAcademicDetails
+)
 router.delete('/lecturers/:id', requireRole('ADMIN'), removeLecturer)
 router.get(
   '/courses',

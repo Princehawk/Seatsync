@@ -4,6 +4,10 @@ import { requireRole } from '../middleware/authMiddleware.js'
 
 const router = express.Router()
 
-router.post('/publish', requireRole('ADMIN', 'LECTURER'), publishScheduleDraftsController)
+router.post(
+  '/publish',
+  requireRole('ADMIN', 'LECTURER'),
+  publishScheduleDraftsController
+)
 
 export default router

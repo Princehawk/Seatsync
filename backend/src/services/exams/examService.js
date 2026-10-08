@@ -15,7 +15,9 @@ const toMinutes = value => {
 const overlaps = (startA, endA, startB, endB) => startA < endB && endA > startB
 
 const normalizedWeekday = value => {
-  const normalized = String(value || '').slice(0, 3).toUpperCase()
+  const normalized = String(value || '')
+    .slice(0, 3)
+    .toUpperCase()
   return normalized
 }
 
@@ -23,7 +25,9 @@ const weekdayForDate = value => {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''))
   if (!match) return ''
   return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][
-    new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay()
+    new Date(
+      Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    ).getUTCDay()
   ]
 }
 
@@ -186,16 +190,24 @@ export const createExam = async payload => {
          AND start_time < ? AND end_time > ?`,
       [venueId, endTime, startTime]
     )
-    const recurringVenueConflict = scheduledEntries.find(entry =>
-      normalizedWeekday(entry.day_of_week) === weekdayForDate(examDate)
+    const recurringVenueConflict = scheduledEntries.find(
+      entry => normalizedWeekday(entry.day_of_week) === weekdayForDate(examDate)
     )
     if (recurringVenueConflict) {
       return {
         valid: false,
-        conflicts: [{
-          type: 'EXAM_VENUE_CONFLICT',
-          message: `${venue?.name || `Venue ${venueId}`} already has a scheduled ${recurringVenueConflict.day_of_week} event from ${recurringVenueConflict.start_time} to ${recurringVenueConflict.end_time}.`
-        }]
+        conflicts: [
+          {
+            type: 'EXAM_VENUE_CONFLICT',
+            message: `${
+              venue?.name || `Venue ${venueId}`
+            } already has a scheduled ${
+              recurringVenueConflict.day_of_week
+            } event from ${recurringVenueConflict.start_time} to ${
+              recurringVenueConflict.end_time
+            }.`
+          }
+        ]
       }
     }
     const existing = await query(
@@ -254,92 +266,282 @@ export const updateExam = async (id, payload) => {
   const startTime = payload.startTime ?? payload.start_time
   const endTime = payload.endTime ?? payload.end_time
   const durationMinutes = payload.durationMinutes ?? payload.duration_minutes
-  if (!academicYearId || !semesterId || !courseId || !examDate || !startTime || !endTime || !durationMinutes) {
-    return { valid: false, conflicts: [{ type: 'VALIDATION_ERROR', message: 'Exam fields are incomplete.' }] }
+  if (
+    !academicYearId ||
+    !semesterId ||
+    !courseId ||
+    !examDate ||
+    !startTime ||
+    !endTime ||
+    !durationMinutes
+  ) {
+    return {
+      valid: false,
+      conflicts: [
+        { type: 'VALIDATION_ERROR', message: 'Exam fields are incomplete.' }
+      ]
+    }
   }
   const cohortAllocations = payload.cohort_allocations || []
   const venueAllocations = payload.venue_allocations || []
   if (!cohortAllocations.length || !venueAllocations.length) {
-    return { valid: false, conflicts: [{ type: 'VALIDATION_ERROR', message: 'An exam needs at least one cohort and venue allocation.' }] }
+    return {
+      valid: false,
+      conflicts: [
+        {
+          type: 'VALIDATION_ERROR',
+          message: 'An exam needs at least one cohort and venue allocation.'
+        }
+      ]
+    }
   }
 
   const connection = await db.getConnection()
   try {
     await connection.beginTransaction()
-    const [existingExam] = await connection.execute('SELECT id FROM exams WHERE id = ? FOR UPDATE', [id])
+    const [existingExam] = await connection.execute(
+      'SELECT id FROM exams WHERE id = ? FOR UPDATE',
+      [id]
+    )
     if (!existingExam.length) {
       await connection.rollback()
-      return { valid: false, conflicts: [{ type: 'NOT_FOUND', message: 'Exam not found.' }] }
+      return {
+        valid: false,
+        conflicts: [{ type: 'NOT_FOUND', message: 'Exam not found.' }]
+      }
     }
 
     const date = String(examDate).slice(0, 10)
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      String(startTime).slice(0, 5) >= String(endTime).slice(0, 5) ||
+      Number(durationMinutes) < 1
+    ) {
+      throw new Error('The exam needs a valid date, duration, and time range.')
+    }
+    const [clockRows] = await connection.execute(
+      "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today, DATE_FORMAT(CURTIME(), '%H:%i') AS current_time"
+    )
+    if (date < String(clockRows[0]?.today || ''))
+      throw new Error('Exam date cannot be in the past.')
+    if (
+      date === clockRows[0]?.today &&
+      String(startTime).slice(0, 5) <= clockRows[0]?.current_time
+    ) {
+      throw new Error('Exam start time must be later than the current time.')
+    }
+    const cohortIds = cohortAllocations
+      .map(item => Number(item.cohortId ?? item.cohort_id))
+      .filter(Boolean)
+    const venueIds = venueAllocations
+      .map(item => Number(item.venueId ?? item.venue_id))
+      .filter(Boolean)
+    if (
+      cohortIds.length !== cohortAllocations.length ||
+      new Set(cohortIds).size !== cohortIds.length
+    ) {
+      throw new Error('Each cohort can only be added once to an exam.')
+    }
+    if (
+      venueIds.length !== venueAllocations.length ||
+      new Set(venueIds).size !== venueIds.length
+    ) {
+      throw new Error('Each venue can only be added once to an exam.')
+    }
+    const cohortStudentTotal = cohortAllocations.reduce(
+      (total, allocation) =>
+        total +
+        Number(allocation.studentCount ?? allocation.student_count ?? 0),
+      0
+    )
+    const venueStudentTotal = venueAllocations.reduce(
+      (total, allocation) =>
+        total +
+        Number(allocation.studentCount ?? allocation.student_count ?? 0),
+      0
+    )
+    if (
+      cohortAllocations.some(
+        allocation =>
+          Number(allocation.studentCount ?? allocation.student_count ?? 0) < 1
+      ) ||
+      venueStudentTotal < cohortStudentTotal
+    ) {
+      throw new Error(
+        'Venue allocations must cover all students in the selected cohorts.'
+      )
+    }
     const [changedUnit] = await connection.execute(
-      `SELECT id FROM exams WHERE course_id = ? AND exam_date = ?
+      `SELECT id FROM exams WHERE status = 'SCHEDULED' AND course_id = ? AND exam_date = ?
        AND start_time < ? AND end_time > ? AND id <> ? LIMIT 1`,
       [courseId, date, endTime, startTime, id]
     )
-    if (changedUnit.length) throw new Error('This unit already has an overlapping exam on that date.')
+    if (changedUnit.length)
+      throw new Error('This unit already has an overlapping exam on that date.')
 
-    for (const allocation of cohortAllocations) {
-      const cohortId = Number(allocation.cohortId ?? allocation.cohort_id)
-      const [rows] = await connection.execute(`SELECT e.id FROM exams e
+    for (const cohortId of cohortIds) {
+      const [rows] = await connection.execute(
+        `SELECT e.id FROM exams e
         JOIN exam_cohorts ec ON ec.exam_id = e.id
-        WHERE ec.cohort_id = ? AND e.id <> ? AND e.exam_date = ?
+        WHERE e.status = 'SCHEDULED' AND ec.cohort_id = ? AND e.id <> ? AND e.exam_date = ?
           AND e.start_time < ? AND e.end_time > ? LIMIT 1`,
-      [cohortId, id, date, endTime, startTime])
-      if (rows.length) throw new Error('A selected cohort already has an overlapping exam on that date.')
+        [cohortId, id, date, endTime, startTime]
+      )
+      if (rows.length)
+        throw new Error(
+          'A selected cohort already has an overlapping exam on that date.'
+        )
     }
 
     const weekday = weekdayForDate(date)
+    if (cohortIds.length) {
+      const cohortPlaceholders = cohortIds.map(() => '?').join(',')
+      const [cohortTimetableRows] = await connection.execute(
+        `SELECT te.id FROM timetable_entries te
+          LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+          WHERE te.status = 'SCHEDULED'
+            AND LEFT(UPPER(te.day_of_week), 3) = ?
+            AND te.start_time < ? AND te.end_time > ?
+            AND NOT EXISTS (
+              SELECT 1 FROM schedule_overrides so
+              WHERE so.timetable_entry_id = te.id
+                AND so.effective_date = ? AND so.status = 'APPROVED'
+            )
+            AND (te.cohort_id IN (${cohortPlaceholders})
+              OR tec.cohort_id IN (${cohortPlaceholders}))
+          LIMIT 1`,
+        [weekday, endTime, startTime, date, ...cohortIds, ...cohortIds]
+      )
+      if (cohortTimetableRows.length)
+        throw new Error(
+          'A selected cohort has a recurring timetable event during this exam.'
+        )
+      const [cohortOverrideRows] = await connection.execute(
+        `SELECT te.id FROM schedule_overrides so
+          JOIN timetable_entries te ON te.id = so.timetable_entry_id
+          LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+          WHERE so.status = 'APPROVED' AND so.effective_date = ?
+            AND so.new_start_time < ? AND so.new_end_time > ?
+            AND (te.cohort_id IN (${cohortPlaceholders})
+              OR tec.cohort_id IN (${cohortPlaceholders}))
+          LIMIT 1`,
+        [date, endTime, startTime, ...cohortIds, ...cohortIds]
+      )
+      if (cohortOverrideRows.length)
+        throw new Error(
+          'A selected cohort has a make-up class during this exam.'
+        )
+    }
+
     for (const allocation of venueAllocations) {
       const venueId = Number(allocation.venueId ?? allocation.venue_id)
-      const capacity = Number(allocation.allocatedCapacity ?? allocation.allocated_capacity)
-      const studentCount = Number(allocation.studentCount ?? allocation.student_count ?? capacity)
-      const [venueRows] = await connection.execute('SELECT capacity FROM venues WHERE id = ?', [venueId])
-      if (!venueRows.length || capacity < 1 || capacity > Number(venueRows[0].capacity) || studentCount < 1 || studentCount > capacity) {
+      const capacity = Number(
+        allocation.allocatedCapacity ?? allocation.allocated_capacity
+      )
+      const studentCount = Number(
+        allocation.studentCount ?? allocation.student_count ?? capacity
+      )
+      const [venueRows] = await connection.execute(
+        'SELECT capacity FROM venues WHERE id = ?',
+        [venueId]
+      )
+      if (
+        !venueRows.length ||
+        capacity < 1 ||
+        capacity > Number(venueRows[0].capacity) ||
+        studentCount < 1 ||
+        studentCount > capacity
+      ) {
         throw new Error('A venue allocation is invalid or exceeds capacity.')
       }
-      const [recurring] = await connection.execute(`SELECT id FROM timetable_entries
-        WHERE status = 'SCHEDULED' AND venue_id = ? AND LEFT(UPPER(day_of_week), 3) = ?
-          AND start_time < ? AND end_time > ? LIMIT 1`, [venueId, weekday, endTime, startTime])
-      const [otherExam] = await connection.execute(`SELECT e.id FROM exams e
+      const [recurring] = await connection.execute(
+        `SELECT te.id FROM timetable_entries te
+        WHERE te.status = 'SCHEDULED' AND te.venue_id = ? AND LEFT(UPPER(te.day_of_week), 3) = ?
+          AND te.start_time < ? AND te.end_time > ?
+          AND NOT EXISTS (
+            SELECT 1 FROM schedule_overrides so
+            WHERE so.timetable_entry_id = te.id
+              AND so.effective_date = ? AND so.status = 'APPROVED'
+          ) LIMIT 1`,
+        [venueId, weekday, endTime, startTime, date]
+      )
+      const [venueOverride] = await connection.execute(
+        `SELECT id FROM schedule_overrides
+        WHERE status = 'APPROVED' AND effective_date = ? AND new_venue_id = ?
+          AND new_start_time < ? AND new_end_time > ? LIMIT 1`,
+        [date, venueId, endTime, startTime]
+      )
+      const [otherExam] = await connection.execute(
+        `SELECT e.id FROM exams e
         JOIN exam_venue_allocations eva ON eva.exam_id = e.id
         WHERE e.id <> ? AND e.status = 'SCHEDULED' AND eva.venue_id = ? AND e.exam_date = ?
           AND e.start_time < ? AND e.end_time > ? LIMIT 1`,
-      [id, venueId, date, endTime, startTime])
-      if (recurring.length || otherExam.length) throw new Error('A selected venue is already occupied during the exam.')
+        [id, venueId, date, endTime, startTime]
+      )
+      if (recurring.length || venueOverride.length || otherExam.length)
+        throw new Error('A selected venue is already occupied during the exam.')
     }
 
-    await connection.execute(`UPDATE exams SET academic_year_id = ?, semester_id = ?, course_id = ?,
+    await connection.execute(
+      `UPDATE exams SET academic_year_id = ?, semester_id = ?, course_id = ?,
       exam_date = ?, start_time = ?, end_time = ?, duration_minutes = ?, instructions = ?, updated_by = ?
-      WHERE id = ?`, [
-      Number(academicYearId), Number(semesterId), Number(courseId), date, startTime, endTime,
-      Number(durationMinutes), payload.instructions ?? '', payload.updated_by ?? null, id
-    ])
+      WHERE id = ?`,
+      [
+        Number(academicYearId),
+        Number(semesterId),
+        Number(courseId),
+        date,
+        startTime,
+        endTime,
+        Number(durationMinutes),
+        payload.instructions ?? '',
+        payload.updated_by ?? null,
+        id
+      ]
+    )
     await connection.execute('DELETE FROM exam_cohorts WHERE exam_id = ?', [id])
-    await connection.execute('DELETE FROM exam_venue_allocations WHERE exam_id = ?', [id])
+    await connection.execute(
+      'DELETE FROM exam_venue_allocations WHERE exam_id = ?',
+      [id]
+    )
     for (const allocation of cohortAllocations) {
-      await connection.execute('INSERT INTO exam_cohorts (exam_id, cohort_id, student_count) VALUES (?, ?, ?)', [
-        id,
-        Number(allocation.cohortId ?? allocation.cohort_id),
-        Number(allocation.studentCount ?? allocation.student_count)
-      ])
+      await connection.execute(
+        'INSERT INTO exam_cohorts (exam_id, cohort_id, student_count) VALUES (?, ?, ?)',
+        [
+          id,
+          Number(allocation.cohortId ?? allocation.cohort_id),
+          Number(allocation.studentCount ?? allocation.student_count)
+        ]
+      )
     }
     for (const allocation of venueAllocations) {
-      const capacity = Number(allocation.allocatedCapacity ?? allocation.allocated_capacity)
-      await connection.execute('INSERT INTO exam_venue_allocations (exam_id, venue_id, allocated_capacity, student_count) VALUES (?, ?, ?, ?)', [
-        id,
-        Number(allocation.venueId ?? allocation.venue_id),
-        capacity,
-        Number(allocation.studentCount ?? allocation.student_count ?? capacity)
-      ])
+      const capacity = Number(
+        allocation.allocatedCapacity ?? allocation.allocated_capacity
+      )
+      await connection.execute(
+        'INSERT INTO exam_venue_allocations (exam_id, venue_id, allocated_capacity, student_count) VALUES (?, ?, ?, ?)',
+        [
+          id,
+          Number(allocation.venueId ?? allocation.venue_id),
+          capacity,
+          Number(
+            allocation.studentCount ?? allocation.student_count ?? capacity
+          )
+        ]
+      )
     }
-    const [rows] = await connection.execute('SELECT * FROM exams WHERE id = ?', [id])
+    const [rows] = await connection.execute(
+      'SELECT * FROM exams WHERE id = ?',
+      [id]
+    )
     await connection.commit()
     return { valid: true, data: rows[0] }
   } catch (error) {
     await connection.rollback()
-    return { valid: false, conflicts: [{ type: 'EXAM_UPDATE_CONFLICT', message: error.message }] }
+    return {
+      valid: false,
+      conflicts: [{ type: 'EXAM_UPDATE_CONFLICT', message: error.message }]
+    }
   } finally {
     connection.release()
   }
@@ -543,16 +745,20 @@ export const allocateExamVenue = async ({
        AND start_time < ? AND end_time > ?`,
     [candidate.venueId, candidate.endTime, candidate.startTime]
   )
-  const recurringVenueConflict = scheduledEntries.find(entry =>
-    normalizedWeekday(entry.day_of_week) === weekdayForDate(candidate.examDate)
+  const recurringVenueConflict = scheduledEntries.find(
+    entry =>
+      normalizedWeekday(entry.day_of_week) ===
+      weekdayForDate(candidate.examDate)
   )
   if (recurringVenueConflict) {
     return {
       valid: false,
-      conflicts: [{
-        type: 'EXAM_VENUE_CONFLICT',
-        message: `${venue.name} already has a scheduled ${recurringVenueConflict.day_of_week} event from ${recurringVenueConflict.start_time} to ${recurringVenueConflict.end_time}.`
-      }]
+      conflicts: [
+        {
+          type: 'EXAM_VENUE_CONFLICT',
+          message: `${venue.name} already has a scheduled ${recurringVenueConflict.day_of_week} event from ${recurringVenueConflict.start_time} to ${recurringVenueConflict.end_time}.`
+        }
+      ]
     }
   }
 

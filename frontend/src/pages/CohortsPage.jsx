@@ -170,15 +170,17 @@ export default function CohortsPage () {
           <h1>Cohorts</h1>
         </div>
 
-        {canManageCohorts && <div className='toolbar-actions'>
-          <button
-            type='button'
-            className='primary-button'
-            onClick={() => setShowForm(value => !value)}
-          >
-            {showForm ? 'Close form' : 'Add cohort'}
-          </button>
-        </div>}
+        {canManageCohorts && (
+          <div className='toolbar-actions'>
+            <button
+              type='button'
+              className='primary-button'
+              onClick={() => setShowForm(value => !value)}
+            >
+              {showForm ? 'Close form' : 'Add cohort'}
+            </button>
+          </div>
+        )}
       </div>
 
       {showForm && canManageCohorts && (
@@ -359,9 +361,11 @@ export default function CohortsPage () {
                 {visibleCohorts.length ? (
                   visibleCohorts.map(item => (
                     <tr key={item.id ?? item.name}>
-                      {canManageCohorts && <td>
-                        {item.name || item.cohort_name || 'Untitled cohort'}
-                      </td>}
+                      {canManageCohorts && (
+                        <td>
+                          {item.name || item.cohort_name || 'Untitled cohort'}
+                        </td>
+                      )}
                       <td>
                         {programmes.find(
                           value =>
@@ -417,7 +421,9 @@ export default function CohortsPage () {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={canManageCohorts ? 5 : 4}>No cohorts match the selected filters.</td>
+                    <td colSpan={canManageCohorts ? 5 : 4}>
+                      No cohorts match the selected filters.
+                    </td>
                   </tr>
                 )}
               </tbody>

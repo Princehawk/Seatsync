@@ -216,8 +216,11 @@ export const removeLecturer = async (req, res) => {
 export const getLecturerAcademicDetails = async (req, res) => {
   const lecturer = await getLecturer(req.params.id)
   if (!lecturer) return res.status(404).json({ message: 'Lecturer not found.' })
-  const data = await getLecturerAcademicProfile(lecturer.user_id ?? lecturer.userId)
-  if (!data) return res.status(404).json({ message: 'Lecturer profile was not found.' })
+  const data = await getLecturerAcademicProfile(
+    lecturer.user_id ?? lecturer.userId
+  )
+  if (!data)
+    return res.status(404).json({ message: 'Lecturer profile was not found.' })
   return res.json({ data })
 }
 
@@ -237,7 +240,11 @@ export const editLecturerAcademicDetails = async (req, res) => {
     })
     return res.json({ data })
   } catch (error) {
-    return res.status(400).json({ message: error.message || 'Unable to update lecturer academic details.' })
+    return res
+      .status(400)
+      .json({
+        message: error.message || 'Unable to update lecturer academic details.'
+      })
   }
 }
 

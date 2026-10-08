@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { io } from 'socket.io-client'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -26,8 +27,31 @@ import './App.css'
 import ProfileCompletionModal from './components/ProfileCompletionModal'
 
 function ProtectedLayout () {
+  const queryClient = useQueryClient()
   const { user, logout } = useAuth()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  useEffect(() => {
+    const socketUrl = (
+      import.meta.env.VITE_API_URL || 'http://localhost:3000'
+    ).replace(/\/$/, '')
+    const socket = io(socketUrl, { transports: ['websocket'] })
+    const refreshScheduleData = payload => {
+      console.info('[REALTIME] timetable:changed received', payload)
+      queryClient.invalidateQueries({ queryKey: ['timetable'] })
+      queryClient.invalidateQueries({ queryKey: ['timetable-exams'] })
+      queryClient.invalidateQueries({ queryKey: ['exams'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] })
+      queryClient.invalidateQueries({
+        queryKey: ['venue-timetable-allocations']
+      })
+    }
+
+    socket.on('timetable:changed', refreshScheduleData)
+    return () => socket.disconnect()
+  }, [queryClient])
+
   const { data: profileStatus } = useQuery({
     queryKey: ['profile-status', user?.id],
     queryFn: async () => (await api.get('/api/auth/profile-status')).data,
@@ -35,37 +59,138 @@ function ProtectedLayout () {
   })
 
   const handleToggleSidebar = () => {
+    if (window.innerWidth <= 1024) {
+      setMobileNavOpen(false)
+      return
+    }
     setSidebarCollapsed(value => !value)
+  }
+
+  const handleToggleMobileNav = () => {
+    setSidebarCollapsed(false)
+    setMobileNavOpen(value => !value)
   }
 
   const handleNavSelect = () => {
     if (window.innerWidth <= 1024) {
-      setSidebarCollapsed(true)
+      setMobileNavOpen(false)
     }
   }
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {mobileNavOpen && (
+        <button
+          type='button'
+          className='mobile-nav-backdrop'
+          aria-label='Close navigation menu'
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
       <Sidebar
         user={user}
         onLogout={logout}
         collapsed={sidebarCollapsed}
+        mobileOpen={mobileNavOpen}
         onToggleCollapse={handleToggleSidebar}
         onNavSelect={handleNavSelect}
       />
       <main className='main-content'>
+        <div className='mobile-topbar'>
+          <button
+            type='button'
+            className='mobile-menu-button'
+            aria-label={
+              mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'
+            }
+            aria-expanded={mobileNavOpen}
+            onClick={handleToggleMobileNav}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          <strong>SeatSync</strong>
+        </div>
         <Routes>
           <Route path='/dashboard' element={<DashboardPage />} />
           <Route path='/timetable' element={<TimetablePage />} />
-          <Route path='/venues' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP']}><VenuesPage /></RoleProtectedRoute>} />
-          <Route path='/courses' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER']}><CoursesPage /></RoleProtectedRoute>} />
-          <Route path='/cohorts' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'CLASS_REP']}><CohortsPage /></RoleProtectedRoute>} />
-          <Route path='/students' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><StudentsPage /></RoleProtectedRoute>} />
-          <Route path='/lecturers' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><LecturersPage /></RoleProtectedRoute>} />
-          <Route path='/academic/setup' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><AcademicSetupPage /></RoleProtectedRoute>} />
-          <Route path='/reports' element={<RoleProtectedRoute allowedRoles={['ADMIN']}><ReportsPage /></RoleProtectedRoute>} />
-          <Route path='/lecturer/profile' element={<RoleProtectedRoute allowedRoles={['LECTURER']}><LecturerProfilePage /></RoleProtectedRoute>} />
-          <Route path='/exams' element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP']}><ExamsPage /></RoleProtectedRoute>} />
+          <Route
+            path='/venues'
+            element={
+              <RoleProtectedRoute
+                allowedRoles={['ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP']}
+              >
+                <VenuesPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/courses'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN', 'LECTURER']}>
+                <CoursesPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/cohorts'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN', 'CLASS_REP']}>
+                <CohortsPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/students'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN']}>
+                <StudentsPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/lecturers'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN']}>
+                <LecturersPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/academic/setup'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN']}>
+                <AcademicSetupPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/reports'
+            element={
+              <RoleProtectedRoute allowedRoles={['ADMIN']}>
+                <ReportsPage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/lecturer/profile'
+            element={
+              <RoleProtectedRoute allowedRoles={['LECTURER']}>
+                <LecturerProfilePage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
+            path='/exams'
+            element={
+              <RoleProtectedRoute
+                allowedRoles={['ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP']}
+              >
+                <ExamsPage />
+              </RoleProtectedRoute>
+            }
+          />
           <Route path='/notifications' element={<NotificationsPage />} />
           <Route
             path='/admin/users'

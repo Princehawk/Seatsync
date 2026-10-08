@@ -87,7 +87,12 @@ const navByRole = {
       icon: faChartPie,
       to: '/dashboard'
     },
-    { group: 'Academic', label: 'My teaching profile', icon: faUsersCog, to: '/lecturer/profile' },
+    {
+      group: 'Academic',
+      label: 'My teaching profile',
+      icon: faUsersCog,
+      to: '/lecturer/profile'
+    },
     { group: 'Academic', label: 'My units', icon: faBookOpen, to: '/courses' },
     {
       group: 'Scheduling',
@@ -179,6 +184,7 @@ export default function Sidebar ({
   user,
   onLogout,
   collapsed,
+  mobileOpen = false,
   onToggleCollapse,
   onNavSelect
 }) {
@@ -220,7 +226,11 @@ export default function Sidebar ({
   }
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside
+      className={`sidebar ${collapsed ? 'collapsed' : ''} ${
+        mobileOpen ? 'mobile-open' : ''
+      }`}
+    >
       <div className='brand-block'>
         <button
           type='button'

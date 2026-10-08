@@ -46,7 +46,8 @@ export const completeProfile = async (req, res) => {
 
 export const lecturerProfile = async (req, res) => {
   const data = await getLecturerAcademicProfile(req.user.id)
-  if (!data) return res.status(404).json({ message: 'Lecturer profile was not found.' })
+  if (!data)
+    return res.status(404).json({ message: 'Lecturer profile was not found.' })
   return res.json({ data })
 }
 
@@ -66,7 +67,9 @@ export const updateLecturerProfile = async (req, res) => {
     })
     return res.json({ data })
   } catch (error) {
-    return res.status(400).json({ message: error.message || 'Unable to update lecturer profile.' })
+    return res
+      .status(400)
+      .json({ message: error.message || 'Unable to update lecturer profile.' })
   }
 }
 

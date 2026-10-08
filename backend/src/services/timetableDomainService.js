@@ -11,22 +11,46 @@ import { validateTimetableEntry } from './scheduling/conflictService.js'
 export const listTimetableEntries = async user => {
   const roles = Array.isArray(user?.roles) ? user.roles : []
   const lecturerId = roles.includes('LECTURER')
-    ? (await query('SELECT id FROM lecturers WHERE user_id = ? LIMIT 1', [user.id]))[0]?.id
+    ? (
+        await query('SELECT id FROM lecturers WHERE user_id = ? LIMIT 1', [
+          user.id
+        ])
+      )[0]?.id
     : null
   const entries = (
-    await rawQuery(`
+    await rawQuery(
+      `
     SELECT te.*,
+      MAX(u.code) AS unit_code,
+      MAX(u.name) AS unit_name,
+      MAX(CONCAT_WS(' ', NULLIF(lu.first_name, ''), NULLIF(lu.last_name, ''))) AS lecturer_name,
+      MAX(lu.email) AS lecturer_email,
+      MAX(v.name) AS venue_name,
+      MAX(v.code) AS venue_code,
+      MAX(v.capacity) AS venue_capacity,
       GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids,
       GROUP_CONCAT(DISTINCT tep.programme_id) AS programme_ids
     FROM timetable_entries te
+    LEFT JOIN units u ON u.id = te.course_id
+    LEFT JOIN lecturers l ON l.id = te.lecturer_id
+    LEFT JOIN users lu ON lu.id = l.user_id
+    LEFT JOIN venues v ON v.id = te.venue_id
     LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
     LEFT JOIN timetable_entry_programmes tep ON tep.timetable_entry_id = te.id
     ${lecturerId ? 'WHERE te.lecturer_id = ?' : ''}
     GROUP BY te.id
     ORDER BY te.id
-  `, lecturerId ? [lecturerId] : [])
+  `,
+      lecturerId ? [lecturerId] : []
+    )
   ).map(row => ({
     ...row,
+    unitCode: row.unit_code,
+    unitName: row.unit_name,
+    lecturerName: row.lecturer_name || row.lecturer_email,
+    venueName: row.venue_name,
+    venueCode: row.venue_code,
+    venueCapacity: row.venue_capacity,
     cohortIds: row.cohort_ids
       ? String(row.cohort_ids).split(',').map(Number)
       : row.cohort_id
@@ -37,7 +61,7 @@ export const listTimetableEntries = async user => {
       : []
   }))
   const overrides = await rawQuery(
-     `SELECT so.*, DATE_FORMAT(so.effective_date, '%Y-%m-%d') AS effective_date,
+    `SELECT so.*, DATE_FORMAT(so.effective_date, '%Y-%m-%d') AS effective_date,
        te.academic_year_id, te.semester_id, te.course_id,
        te.lecturer_id, te.event_type, te.status AS recurring_status,
        te.cohort_id, u.code AS unit_code, u.name AS unit_name,
@@ -50,7 +74,9 @@ export const listTimetableEntries = async user => {
      JOIN venues v ON v.id = so.new_venue_id
      LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
      LEFT JOIN timetable_entry_programmes tep ON tep.timetable_entry_id = te.id
-    WHERE so.status = 'APPROVED' AND so.effective_date >= CURDATE() ${lecturerId ? 'AND te.lecturer_id = ?' : ''}
+    WHERE so.status = 'APPROVED' AND so.effective_date >= CURDATE() ${
+      lecturerId ? 'AND te.lecturer_id = ?' : ''
+    }
      GROUP BY so.id
      ORDER BY so.effective_date, so.new_start_time`,
     lecturerId ? [lecturerId] : []
@@ -72,8 +98,12 @@ export const listTimetableEntries = async user => {
       event_type: 'MAKEUP',
       unitCode: item.unit_code,
       unitName: item.unit_name,
-      cohortIds: item.cohort_ids ? String(item.cohort_ids).split(',').map(Number) : [],
-      programmeIds: item.programme_ids ? String(item.programme_ids).split(',').map(Number) : []
+      cohortIds: item.cohort_ids
+        ? String(item.cohort_ids).split(',').map(Number)
+        : [],
+      programmeIds: item.programme_ids
+        ? String(item.programme_ids).split(',').map(Number)
+        : []
     }))
   ]
 }
@@ -82,19 +112,40 @@ export const getTimetableEntry = async id => findById('timetable_entries', id)
 const weekdayFromDate = value => {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''))
   if (!match) return null
-  return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][
-    new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay()
+  return [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday'
+  ][
+    new Date(
+      Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    ).getUTCDay()
   ]
 }
 
 export const createTimetableEntry = async payload => {
-  const actorRoles = Array.isArray(payload.actor_roles) ? payload.actor_roles : []
+  const actorRoles = Array.isArray(payload.actor_roles)
+    ? payload.actor_roles
+    : []
   if (actorRoles.includes('LECTURER')) {
     const assignedLecturer = await findById('lecturers', payload.lecturer_id)
-    if (!assignedLecturer || Number(assignedLecturer.userId ?? assignedLecturer.user_id) !== Number(payload.actor_user_id)) {
+    if (
+      !assignedLecturer ||
+      Number(assignedLecturer.userId ?? assignedLecturer.user_id) !==
+        Number(payload.actor_user_id)
+    ) {
       return {
         valid: false,
-        conflicts: [{ type: 'FORBIDDEN', message: 'Lecturers can only schedule their own classes.' }]
+        conflicts: [
+          {
+            type: 'FORBIDDEN',
+            message: 'Lecturers can only schedule their own classes.'
+          }
+        ]
       }
     }
   }
@@ -103,9 +154,13 @@ export const createTimetableEntry = async payload => {
     Array.isArray(payload.cohort_ids) && payload.cohort_ids.length
       ? payload.cohort_ids
       : [payload.cohort_id]
-  ).map(Number).filter(Boolean)
-  const existingEvents = payload.existing_events || payload.existingEvents || [
-    ...(await rawQuery(`
+  )
+    .map(Number)
+    .filter(Boolean)
+  const existingEvents = payload.existing_events ||
+    payload.existingEvents || [
+      ...(
+        await rawQuery(`
       SELECT te.*,
         GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids,
         GROUP_CONCAT(DISTINCT tep.programme_id) AS programme_ids
@@ -114,12 +169,14 @@ export const createTimetableEntry = async payload => {
       LEFT JOIN timetable_entry_programmes tep ON tep.timetable_entry_id = te.id
       WHERE te.status = 'SCHEDULED'
       GROUP BY te.id
-    `)).map(event => ({
-      ...event,
-      cohort_ids: event.cohort_ids || String(event.cohort_id || ''),
-      event_type: event.event_type || 'LECTURE'
-    })),
-    ...(await rawQuery(`
+    `)
+      ).map(event => ({
+        ...event,
+        cohort_ids: event.cohort_ids || String(event.cohort_id || ''),
+        event_type: event.event_type || 'LECTURE'
+      })),
+      ...(
+        await rawQuery(`
       SELECT e.id, DATE_FORMAT(e.exam_date, '%Y-%m-%d') AS exam_date,
         e.start_time, e.end_time, 'EXAM' AS event_type,
         GROUP_CONCAT(DISTINCT ec.cohort_id) AS cohort_ids,
@@ -129,15 +186,16 @@ export const createTimetableEntry = async payload => {
       LEFT JOIN exam_venue_allocations eva ON eva.exam_id = e.id
       WHERE e.status = 'SCHEDULED'
       GROUP BY e.id
-    `)).map(exam => ({
-      ...exam,
-      day_of_week: weekdayFromDate(exam.exam_date),
-      start_time: String(exam.start_time).slice(0, 5),
-      end_time: String(exam.end_time).slice(0, 5),
-      venue_ids: exam.venue_ids || '',
-      cohort_ids: exam.cohort_ids || ''
-    }))
-  ]
+    `)
+      ).map(exam => ({
+        ...exam,
+        day_of_week: weekdayFromDate(exam.exam_date),
+        start_time: String(exam.start_time).slice(0, 5),
+        end_time: String(exam.end_time).slice(0, 5),
+        venue_ids: exam.venue_ids || '',
+        cohort_ids: exam.cohort_ids || ''
+      }))
+    ]
   const venueBlocks =
     payload.venue_blocks ||
     payload.venueBlocks ||
@@ -226,7 +284,11 @@ export const createTimetableEntry = async payload => {
 }
 
 export const updateTimetableEntry = async (id, updates) => {
-  const { programme_ids: programmeIds = [], cohort_ids: cohortIds = [], ...fields } = updates
+  const {
+    programme_ids: programmeIds = [],
+    cohort_ids: cohortIds = [],
+    ...fields
+  } = updates
   const allowedFields = [
     'academic_year_id',
     'semester_id',
@@ -247,7 +309,10 @@ export const updateTimetableEntry = async (id, updates) => {
   const connection = await db.getConnection()
   try {
     await connection.beginTransaction()
-    const [existing] = await connection.execute('SELECT id FROM timetable_entries WHERE id = ? FOR UPDATE', [id])
+    const [existing] = await connection.execute(
+      'SELECT id FROM timetable_entries WHERE id = ? FOR UPDATE',
+      [id]
+    )
     if (!existing.length) {
       await connection.rollback()
       return null
@@ -261,7 +326,10 @@ export const updateTimetableEntry = async (id, updates) => {
       )
     }
     if (Array.isArray(programmeIds)) {
-      await connection.execute('DELETE FROM timetable_entry_programmes WHERE timetable_entry_id = ?', [id])
+      await connection.execute(
+        'DELETE FROM timetable_entry_programmes WHERE timetable_entry_id = ?',
+        [id]
+      )
       for (const programmeId of programmeIds.map(Number).filter(Boolean)) {
         await connection.execute(
           'INSERT INTO timetable_entry_programmes (timetable_entry_id, programme_id) VALUES (?, ?)',
@@ -270,7 +338,10 @@ export const updateTimetableEntry = async (id, updates) => {
       }
     }
     if (Array.isArray(cohortIds)) {
-      await connection.execute('DELETE FROM timetable_entry_cohorts WHERE timetable_entry_id = ?', [id])
+      await connection.execute(
+        'DELETE FROM timetable_entry_cohorts WHERE timetable_entry_id = ?',
+        [id]
+      )
       for (const cohortId of cohortIds.map(Number).filter(Boolean)) {
         await connection.execute(
           'INSERT INTO timetable_entry_cohorts (timetable_entry_id, cohort_id) VALUES (?, ?)',
@@ -278,7 +349,10 @@ export const updateTimetableEntry = async (id, updates) => {
         )
       }
     }
-    const [rows] = await connection.execute('SELECT * FROM timetable_entries WHERE id = ?', [id])
+    const [rows] = await connection.execute(
+      'SELECT * FROM timetable_entries WHERE id = ?',
+      [id]
+    )
     await connection.commit()
     return rows[0]
   } catch (error) {
@@ -308,13 +382,18 @@ export const listAvailability = async ({
 
   if ((queryDate || requestedDay) && normalizedStart && normalizedEnd) {
     const dayOfWeek = queryDate ? weekdayFromDate(queryDate) : requestedDay
-    const shortDay = String(dayOfWeek || '').slice(0, 3).toUpperCase()
+    const shortDay = String(dayOfWeek || '')
+      .slice(0, 3)
+      .toUpperCase()
     const regularEntries = await rawQuery(
       `SELECT id, venue_id, lecturer_id, cohort_id, day_of_week, start_time, end_time, event_type
        FROM timetable_entries WHERE status = 'SCHEDULED'`
     )
-    const entriesOnDay = regularEntries.filter(entry =>
-      String(entry.day_of_week || '').slice(0, 3).toUpperCase() === shortDay
+    const entriesOnDay = regularEntries.filter(
+      entry =>
+        String(entry.day_of_week || '')
+          .slice(0, 3)
+          .toUpperCase() === shortDay
     )
 
     const appliedOverrides = queryDate
@@ -324,7 +403,9 @@ export const listAvailability = async ({
         })
       : []
     const overriddenEntryIds = new Set(
-      appliedOverrides.map(item => Number(item.timetableEntryId ?? item.timetable_entry_id))
+      appliedOverrides.map(item =>
+        Number(item.timetableEntryId ?? item.timetable_entry_id)
+      )
     )
 
     const exams = queryDate
@@ -345,9 +426,10 @@ export const listAvailability = async ({
         )
 
     bookedEvents = [
-      ...entriesOnDay.filter(item =>
-        !overriddenEntryIds.has(Number(item.id)) &&
-        Number(item.id) !== Number(excludeTimetableEntryId)
+      ...entriesOnDay.filter(
+        item =>
+          !overriddenEntryIds.has(Number(item.id)) &&
+          Number(item.id) !== Number(excludeTimetableEntryId)
       ),
       ...exams.map(item => ({
         ...item,
@@ -362,8 +444,13 @@ export const listAvailability = async ({
         lecturer_id: null,
         cohort_id: null,
         day_of_week: dayOfWeek,
-        start_time: String(item.newStartTime ?? (item.new_start_time || '')).slice(0, 5),
-        end_time: String(item.newEndTime ?? (item.new_end_time || '')).slice(0, 5),
+        start_time: String(
+          item.newStartTime ?? (item.new_start_time || '')
+        ).slice(0, 5),
+        end_time: String(item.newEndTime ?? (item.new_end_time || '')).slice(
+          0,
+          5
+        ),
         event_type: 'MAKEUP'
       }))
     ]
@@ -381,16 +468,26 @@ export const listAvailability = async ({
   return venues.filter(venue => {
     if (Number(venue.capacity) < Number(requiredCapacity || 0)) return false
     if (venue.status !== 'ACTIVE') return false
-    if (venueType && Number(venue.venue_type_id) !== Number(venueType)) return false
+    if (venueType && Number(venue.venue_type_id) !== Number(venueType))
+      return false
     if ((queryDate || requestedDay) && normalizedStart && normalizedEnd) {
-      if (activeBlocks.some(block => Number(block.venue_id) === Number(venue.id))) return false
-      if (bookedEvents.some(event => {
-        const venuesForEvent = String(event.venue_ids || event.venue_id || '').split(',').filter(Boolean).map(Number)
-        if (!venuesForEvent.includes(Number(venue.id))) return false
-        const eventStart = String(event.start_time || '').slice(0, 5)
-        const eventEnd = String(event.end_time || '').slice(0, 5)
-        return normalizedStart < eventEnd && normalizedEnd > eventStart
-      })) return false
+      if (
+        activeBlocks.some(block => Number(block.venue_id) === Number(venue.id))
+      )
+        return false
+      if (
+        bookedEvents.some(event => {
+          const venuesForEvent = String(event.venue_ids || event.venue_id || '')
+            .split(',')
+            .filter(Boolean)
+            .map(Number)
+          if (!venuesForEvent.includes(Number(venue.id))) return false
+          const eventStart = String(event.start_time || '').slice(0, 5)
+          const eventEnd = String(event.end_time || '').slice(0, 5)
+          return normalizedStart < eventEnd && normalizedEnd > eventStart
+        })
+      )
+        return false
     }
     return true
   })

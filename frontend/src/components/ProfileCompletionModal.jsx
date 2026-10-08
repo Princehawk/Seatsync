@@ -77,15 +77,30 @@ export default function ProfileCompletionModal ({ role }) {
         : current.facultyIds.filter(id => id !== String(facultyId))
       const departmentIds = current.departmentIds.filter(id => {
         const department = departments.find(item => String(item.id) === id)
-        return department && facultyIds.includes(String(department.faculty_id ?? department.facultyId))
+        return (
+          department &&
+          facultyIds.includes(
+            String(department.faculty_id ?? department.facultyId)
+          )
+        )
       })
       const programmeIds = current.programmeIds.filter(id => {
         const programme = programmes.find(item => String(item.id) === id)
-        return programme && departmentIds.includes(String(programme.department_id ?? programme.departmentId))
+        return (
+          programme &&
+          departmentIds.includes(
+            String(programme.department_id ?? programme.departmentId)
+          )
+        )
       })
       const unitIds = current.unitIds.filter(id => {
         const unit = units.find(item => String(item.id) === id)
-        return unit && (unit.programmeIds || []).some(programmeId => programmeIds.includes(String(programmeId)))
+        return (
+          unit &&
+          (unit.programmeIds || []).some(programmeId =>
+            programmeIds.includes(String(programmeId))
+          )
+        )
       })
       return { ...current, facultyIds, departmentIds, programmeIds, unitIds }
     })
@@ -98,11 +113,21 @@ export default function ProfileCompletionModal ({ role }) {
         : current.departmentIds.filter(id => id !== String(departmentId))
       const programmeIds = current.programmeIds.filter(id => {
         const programme = programmes.find(item => String(item.id) === id)
-        return programme && departmentIds.includes(String(programme.department_id ?? programme.departmentId))
+        return (
+          programme &&
+          departmentIds.includes(
+            String(programme.department_id ?? programme.departmentId)
+          )
+        )
       })
       const unitIds = current.unitIds.filter(id => {
         const unit = units.find(item => String(item.id) === id)
-        return unit && (unit.programmeIds || []).some(programmeId => programmeIds.includes(String(programmeId)))
+        return (
+          unit &&
+          (unit.programmeIds || []).some(programmeId =>
+            programmeIds.includes(String(programmeId))
+          )
+        )
       })
       return { ...current, departmentIds, programmeIds, unitIds }
     })
@@ -115,7 +140,12 @@ export default function ProfileCompletionModal ({ role }) {
         : current.programmeIds.filter(id => id !== String(programmeId))
       const unitIds = current.unitIds.filter(id => {
         const unit = units.find(item => String(item.id) === id)
-        return unit && (unit.programmeIds || []).some(id => programmeIds.includes(String(id)))
+        return (
+          unit &&
+          (unit.programmeIds || []).some(id =>
+            programmeIds.includes(String(id))
+          )
+        )
       })
       return { ...current, programmeIds, unitIds }
     })
@@ -150,7 +180,9 @@ export default function ProfileCompletionModal ({ role }) {
         <p className='eyebrow'>Complete academic profile</p>
         <h2>{isLecturer ? 'Teaching assignments' : 'Student information'}</h2>
         <p className='muted'>
-          Complete these details before using the academic workspace. Removing a faculty, department, or programme also clears its dependent selections.
+          Complete these details before using the academic workspace. Removing a
+          faculty, department, or programme also clears its dependent
+          selections.
         </p>
         <form className='stack-form profile-completion-form' onSubmit={submit}>
           {isLecturer ? (
@@ -163,9 +195,9 @@ export default function ProfileCompletionModal ({ role }) {
                       <input
                         type='checkbox'
                         checked={form.facultyIds.includes(String(item.id))}
-                          onChange={event =>
-                            toggleFaculty(item.id, event.target.checked)
-                          }
+                        onChange={event =>
+                          toggleFaculty(item.id, event.target.checked)
+                        }
                       />
                       <span>{item.name || item.code}</span>
                     </label>
@@ -180,9 +212,9 @@ export default function ProfileCompletionModal ({ role }) {
                       <input
                         type='checkbox'
                         checked={form.departmentIds.includes(String(item.id))}
-                          onChange={event =>
-                            toggleDepartment(item.id, event.target.checked)
-                          }
+                        onChange={event =>
+                          toggleDepartment(item.id, event.target.checked)
+                        }
                       />
                       <span>{item.name || item.code}</span>
                     </label>
@@ -200,9 +232,9 @@ export default function ProfileCompletionModal ({ role }) {
                       <input
                         type='checkbox'
                         checked={form.programmeIds.includes(String(item.id))}
-                          onChange={event =>
-                            toggleProgramme(item.id, event.target.checked)
-                          }
+                        onChange={event =>
+                          toggleProgramme(item.id, event.target.checked)
+                        }
                       />
                       <span>{item.name || item.code}</span>
                     </label>

@@ -351,7 +351,8 @@ export const deleteStudent = async id => deleteRow('students', id)
 export const listLecturers = async user => {
   const isSelf = (user?.roles || []).includes('LECTURER')
   return (
-    await rawQuery(`
+    await rawQuery(
+      `
     SELECT l.*, u.first_name, u.last_name, u.email, u.phone_number,
       GROUP_CONCAT(DISTINCT lp.programme_id) AS programme_ids,
       GROUP_CONCAT(DISTINCT ld.department_id) AS department_ids,
@@ -366,13 +367,19 @@ export const listLecturers = async user => {
     ${isSelf ? 'WHERE l.user_id = ?' : ''}
     GROUP BY l.id
     ORDER BY l.id
-  `, isSelf ? [user.id] : [])
+  `,
+      isSelf ? [user.id] : []
+    )
   ).map(row => ({
     ...serialize(row),
     name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email,
     phoneNumber: row.phone_number,
-    programmeIds: row.programme_ids ? String(row.programme_ids).split(',').map(Number) : [],
-    departmentIds: row.department_ids ? String(row.department_ids).split(',').map(Number) : [],
+    programmeIds: row.programme_ids
+      ? String(row.programme_ids).split(',').map(Number)
+      : [],
+    departmentIds: row.department_ids
+      ? String(row.department_ids).split(',').map(Number)
+      : [],
     unitIds: row.unit_ids ? String(row.unit_ids).split(',').map(Number) : [],
     units: row.unit_names ? String(row.unit_names).split(' | ') : []
   }))

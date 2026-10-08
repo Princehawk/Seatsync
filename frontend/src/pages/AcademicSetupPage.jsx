@@ -384,8 +384,8 @@ export default function AcademicSetupPage () {
       </div>
 
       {showBuilder && (
-        <section className='content-panel'>
-          <div className='toolbar-actions' style={{ marginBottom: '16px' }}>
+        <section className='content-panel academic-builder-panel'>
+          <div className='toolbar-actions academic-section-switcher'>
             {sectionConfig.map(section => (
               <button
                 key={section.key}
@@ -402,7 +402,10 @@ export default function AcademicSetupPage () {
             ))}
           </div>
 
-          <form className='stack-form' onSubmit={handleSubmit}>
+          <form
+            className='stack-form academic-builder-form'
+            onSubmit={handleSubmit}
+          >
             <div className='form-grid'>
               {activeSection === 'faculty' && (
                 <>

@@ -20,7 +20,8 @@ export const createScheduleOverride = async ({
   requesterUserId,
   requesterRoles = []
 }) => {
-  const value = (camel, snake) => timetableEntry?.[camel] ?? timetableEntry?.[snake]
+  const value = (camel, snake) =>
+    timetableEntry?.[camel] ?? timetableEntry?.[snake]
   if (
     !timetableEntryId ||
     !effectiveDate ||
@@ -48,13 +49,26 @@ export const createScheduleOverride = async ({
     }
   }
 
-  const roles = Array.isArray(requesterRoles) ? requesterRoles : [requesterRoles]
+  const roles = Array.isArray(requesterRoles)
+    ? requesterRoles
+    : [requesterRoles]
   if (!roles.includes('ADMIN')) {
-    const lecturer = await findById('lecturers', value('lecturerId', 'lecturer_id'))
-    if (!lecturer || Number(lecturer.userId ?? lecturer.user_id) !== Number(requesterUserId)) {
+    const lecturer = await findById(
+      'lecturers',
+      value('lecturerId', 'lecturer_id')
+    )
+    if (
+      !lecturer ||
+      Number(lecturer.userId ?? lecturer.user_id) !== Number(requesterUserId)
+    ) {
       return {
         valid: false,
-        conflicts: [{ type: 'FORBIDDEN', message: 'You can only reschedule your own classes.' }]
+        conflicts: [
+          {
+            type: 'FORBIDDEN',
+            message: 'You can only reschedule your own classes.'
+          }
+        ]
       }
     }
   }
@@ -62,7 +76,12 @@ export const createScheduleOverride = async ({
   if (String(newStartTime) >= String(newEndTime)) {
     return {
       valid: false,
-      conflicts: [{ type: 'VALIDATION_ERROR', message: 'The end time must be later than the start time.' }]
+      conflicts: [
+        {
+          type: 'VALIDATION_ERROR',
+          message: 'The end time must be later than the start time.'
+        }
+      ]
     }
   }
 
@@ -75,7 +94,12 @@ export const createScheduleOverride = async ({
   if (existingOverride.length) {
     return {
       valid: false,
-      conflicts: [{ type: 'VALIDATION_ERROR', message: 'This class already has a make-up arrangement for that date.' }]
+      conflicts: [
+        {
+          type: 'VALIDATION_ERROR',
+          message: 'This class already has a make-up arrangement for that date.'
+        }
+      ]
     }
   }
 
@@ -100,7 +124,12 @@ export const createScheduleOverride = async ({
   if (cohortCount > Number(newVenue.capacity || 0)) {
     return {
       valid: false,
-      conflicts: [{ type: 'VENUE_CAPACITY_CONFLICT', message: `${newVenue.name} has capacity for ${newVenue.capacity} students, but the class has ${cohortCount}.` }]
+      conflicts: [
+        {
+          type: 'VENUE_CAPACITY_CONFLICT',
+          message: `${newVenue.name} has capacity for ${newVenue.capacity} students, but the class has ${cohortCount}.`
+        }
+      ]
     }
   }
 
@@ -137,9 +166,15 @@ export const createScheduleOverride = async ({
       ]
     }
   }
-  const dayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][
-    new Date(`${effectiveDate}T00:00:00Z`).getUTCDay()
-  ]
+  const dayOfWeek = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday'
+  ][new Date(`${effectiveDate}T00:00:00Z`).getUTCDay()]
   const [timetableRows, examRows] = await Promise.all([
     query(
       `SELECT te.*, GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids
@@ -147,7 +182,12 @@ export const createScheduleOverride = async ({
        LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
       WHERE te.day_of_week IN (?, ?, ?, ?) AND te.status = 'SCHEDULED'
        GROUP BY te.id`,
-          [dayOfWeek, dayOfWeek.slice(0, 3), dayOfWeek.toUpperCase(), dayOfWeek.slice(0, 3).toUpperCase()]
+      [
+        dayOfWeek,
+        dayOfWeek.slice(0, 3),
+        dayOfWeek.toUpperCase(),
+        dayOfWeek.slice(0, 3).toUpperCase()
+      ]
     ),
     query(
       `SELECT e.id, e.start_time, e.end_time, 'EXAM' AS event_type,
@@ -161,11 +201,23 @@ export const createScheduleOverride = async ({
       [effectiveDate]
     )
   ])
-  const otherEntries = timetableRows.filter(row => Number(row.id) !== Number(timetableEntryId))
-  const currentEntry = timetableRows.find(row => Number(row.id) === Number(timetableEntryId))
+  const otherEntries = timetableRows.filter(
+    row => Number(row.id) !== Number(timetableEntryId)
+  )
+  const currentEntry = timetableRows.find(
+    row => Number(row.id) === Number(timetableEntryId)
+  )
   const existingEvents = [
-    ...otherEntries.map(row => ({ ...row, venue_ids: String(row.venue_id), cohort_ids: row.cohort_ids || String(row.cohort_id || '') })),
-    ...examRows.map(row => ({ ...row, venue_ids: row.venue_ids || '', cohort_ids: row.cohort_ids || '' }))
+    ...otherEntries.map(row => ({
+      ...row,
+      venue_ids: String(row.venue_id),
+      cohort_ids: row.cohort_ids || String(row.cohort_id || '')
+    })),
+    ...examRows.map(row => ({
+      ...row,
+      venue_ids: row.venue_ids || '',
+      cohort_ids: row.cohort_ids || ''
+    }))
   ]
   const validation = validateTimetableEntry({
     venueId: newVenueId,

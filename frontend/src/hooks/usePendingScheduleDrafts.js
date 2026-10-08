@@ -39,7 +39,12 @@ export default function usePendingScheduleDrafts () {
   const stageDraft = useCallback((kind, payload, createdBy = null) => {
     const next = [
       ...readDrafts(),
-      { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, kind, payload, createdBy }
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        kind,
+        payload,
+        createdBy
+      }
     ]
     writeDrafts(next)
     setPublishError('')
@@ -49,28 +54,50 @@ export default function usePendingScheduleDrafts () {
     writeDrafts(readDrafts().filter(draft => draft.id !== id))
   }, [])
 
-  const publishDrafts = useCallback(async (selectedDrafts = null) => {
-    const batch = selectedDrafts || readDrafts()
-    if (!batch.length) return
-    setIsPublishing(true)
-    setPublishError('')
-    try {
-      await api.post('/api/schedules/publish', { drafts: batch })
-      const publishedIds = new Set(batch.map(draft => draft.id))
-      writeDrafts(readDrafts().filter(draft => !publishedIds.has(draft.id)))
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['timetable'] }),
-        queryClient.invalidateQueries({ queryKey: ['exams'] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] }),
-        queryClient.invalidateQueries({ queryKey: ['venues'] })
-      ])
-    } catch (error) {
-      setPublishError(error.message || 'Unable to publish schedule drafts. Nothing was added to the timetable.')
-      throw error
-    } finally {
-      setIsPublishing(false)
-    }
-  }, [queryClient])
+  const updateDraft = useCallback((id, payload) => {
+    writeDrafts(
+      readDrafts().map(draft =>
+        draft.id === id ? { ...draft, payload } : draft
+      )
+    )
+  }, [])
 
-  return { drafts, stageDraft, removeDraft, publishDrafts, isPublishing, publishError }
+  const publishDrafts = useCallback(
+    async (selectedDrafts = null) => {
+      const batch = selectedDrafts || readDrafts()
+      if (!batch.length) return
+      setIsPublishing(true)
+      setPublishError('')
+      try {
+        await api.post('/api/schedules/publish', { drafts: batch })
+        const publishedIds = new Set(batch.map(draft => draft.id))
+        writeDrafts(readDrafts().filter(draft => !publishedIds.has(draft.id)))
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['timetable'] }),
+          queryClient.invalidateQueries({ queryKey: ['exams'] }),
+          queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] }),
+          queryClient.invalidateQueries({ queryKey: ['venues'] })
+        ])
+      } catch (error) {
+        setPublishError(
+          error.message ||
+            'Unable to publish schedule drafts. Nothing was added to the timetable.'
+        )
+        throw error
+      } finally {
+        setIsPublishing(false)
+      }
+    },
+    [queryClient]
+  )
+
+  return {
+    drafts,
+    stageDraft,
+    removeDraft,
+    updateDraft,
+    publishDrafts,
+    isPublishing,
+    publishError
+  }
 }

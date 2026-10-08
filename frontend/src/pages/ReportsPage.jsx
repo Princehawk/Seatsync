@@ -22,7 +22,8 @@ const prettyAuditDetails = value => {
 
     if (parsed === null || parsed === undefined) return '—'
     if (typeof parsed === 'boolean') return parsed ? 'Yes' : 'No'
-    if (typeof parsed === 'number' || typeof parsed === 'string') return String(parsed)
+    if (typeof parsed === 'number' || typeof parsed === 'string')
+      return String(parsed)
     if (Array.isArray(parsed)) {
       return parsed
         .map(item => {
@@ -37,7 +38,10 @@ const prettyAuditDetails = value => {
     }
     if (typeof parsed === 'object') {
       return Object.entries(parsed)
-        .map(([key, entryValue]) => `${key.replaceAll('_', ' ')}: ${formatValue(entryValue)}`)
+        .map(
+          ([key, entryValue]) =>
+            `${key.replaceAll('_', ' ')}: ${formatValue(entryValue)}`
+        )
         .join(' • ')
     }
     return String(parsed)
@@ -220,7 +224,13 @@ export default function ReportsPage () {
                       <td>{log.entity_id ?? '—'}</td>
                       <td>{log.reason || '—'}</td>
                       <td>
-                        <button type='button' className='table-action' onClick={() => setViewingLog(log)}>View</button>
+                        <button
+                          type='button'
+                          className='table-action'
+                          onClick={() => setViewingLog(log)}
+                        >
+                          View
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -246,20 +256,62 @@ export default function ReportsPage () {
         />
       </section>
       {viewingLog && (
-        <div className='profile-modal-backdrop' onClick={() => setViewingLog(null)}>
-          <section className='profile-modal content-panel audit-detail-modal' role='dialog' aria-modal='true' aria-labelledby='audit-detail-heading' onClick={event => event.stopPropagation()}>
+        <div
+          className='profile-modal-backdrop'
+          onClick={() => setViewingLog(null)}
+        >
+          <section
+            className='profile-modal content-panel audit-detail-modal'
+            role='dialog'
+            aria-modal='true'
+            aria-labelledby='audit-detail-heading'
+            onClick={event => event.stopPropagation()}
+          >
             <div className='page-header'>
               <div>
                 <p className='eyebrow'>Audit record · #{viewingLog.id}</p>
-                <h2 id='audit-detail-heading'>{String(viewingLog.action || '').replaceAll('_', ' ')}</h2>
+                <h2 id='audit-detail-heading'>
+                  {String(viewingLog.action || '').replaceAll('_', ' ')}
+                </h2>
               </div>
-              <button type='button' className='secondary-button' onClick={() => setViewingLog(null)}>Close</button>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setViewingLog(null)}
+              >
+                Close
+              </button>
             </div>
             <dl className='audit-detail-meta'>
-              <div><dt>Actor</dt><dd>{[viewingLog.first_name, viewingLog.last_name].filter(Boolean).join(' ') || viewingLog.email || 'System'}</dd></div>
-              <div><dt>Record</dt><dd>{String(viewingLog.entity_type || '').replaceAll('_', ' ')} #{viewingLog.entity_id ?? '—'}</dd></div>
-              <div><dt>Timestamp</dt><dd>{viewingLog.created_at ? new Date(viewingLog.created_at).toLocaleString() : '—'}</dd></div>
-              <div><dt>Reason</dt><dd>{viewingLog.reason || 'No reason supplied'}</dd></div>
+              <div>
+                <dt>Actor</dt>
+                <dd>
+                  {[viewingLog.first_name, viewingLog.last_name]
+                    .filter(Boolean)
+                    .join(' ') ||
+                    viewingLog.email ||
+                    'System'}
+                </dd>
+              </div>
+              <div>
+                <dt>Record</dt>
+                <dd>
+                  {String(viewingLog.entity_type || '').replaceAll('_', ' ')} #
+                  {viewingLog.entity_id ?? '—'}
+                </dd>
+              </div>
+              <div>
+                <dt>Timestamp</dt>
+                <dd>
+                  {viewingLog.created_at
+                    ? new Date(viewingLog.created_at).toLocaleString()
+                    : '—'}
+                </dd>
+              </div>
+              <div>
+                <dt>Reason</dt>
+                <dd>{viewingLog.reason || 'No reason supplied'}</dd>
+              </div>
             </dl>
             <div className='audit-detail-changes'>
               <section>

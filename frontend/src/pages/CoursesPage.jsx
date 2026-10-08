@@ -253,13 +253,15 @@ export default function CoursesPage () {
         </div>
 
         <div className='toolbar-actions'>
-          {canManageUnits && <button
-            type='button'
-            className='primary-button'
-            onClick={() => setShowForm(value => !value)}
-          >
-            {showForm ? 'Close form' : 'Add unit'}
-          </button>}
+          {canManageUnits && (
+            <button
+              type='button'
+              className='primary-button'
+              onClick={() => setShowForm(value => !value)}
+            >
+              {showForm ? 'Close form' : 'Add unit'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -546,60 +548,65 @@ export default function CoursesPage () {
                         {(item.programmeIds || [])
                           .map(id => programmeNameMap[String(id)])
                           .filter(Boolean)
-                            .join(', ') || 'Unassigned'}
-                          </td>
+                          .join(', ') || 'Unassigned'}
+                      </td>
                       <td>{item.year_level ?? item.yearLevel ?? 'N/A'}</td>
                       <td>
                         {item.is_active ?? item.isActive
                           ? 'Active'
                           : 'Inactive'}
                       </td>
-                      {canManageUnits && <td>
-                        <button
-                          type='button'
-                          className='table-action'
-                          onClick={() => {
-                            setEditingUnit(item)
-                            setEditForm({
-                              ...emptyUnit,
-                              code: item.code || '',
-                              name: item.name || '',
-                              description: item.description || '',
-                              department_ids: (item.departmentIds?.length
-                                ? item.departmentIds
-                                : [
-                                    item.department_id ?? item.departmentId
-                                  ].filter(Boolean)
-                              ).map(String),
-                              programme_ids: (item.programmeIds?.length
-                                ? item.programmeIds
-                                : [
-                                    item.programme_id ?? item.programmeId
-                                  ].filter(Boolean)
-                              ).map(String),
-                              semester_id: String(
-                                item.semester_id ?? item.semesterId ?? ''
-                              ),
-                              year_level: item.year_level ?? item.yearLevel ?? 1
-                            })
-                          }}
-                        >
-                          Edit
-                        </button>{' '}
-                        <button
-                          type='button'
-                          className='table-action danger'
-                          onClick={() => setUnitToDelete(item)}
-                          disabled={deleteCourseMutation.isPending}
-                        >
-                          Delete
-                        </button>
-                      </td>}
+                      {canManageUnits && (
+                        <td>
+                          <button
+                            type='button'
+                            className='table-action'
+                            onClick={() => {
+                              setEditingUnit(item)
+                              setEditForm({
+                                ...emptyUnit,
+                                code: item.code || '',
+                                name: item.name || '',
+                                description: item.description || '',
+                                department_ids: (item.departmentIds?.length
+                                  ? item.departmentIds
+                                  : [
+                                      item.department_id ?? item.departmentId
+                                    ].filter(Boolean)
+                                ).map(String),
+                                programme_ids: (item.programmeIds?.length
+                                  ? item.programmeIds
+                                  : [
+                                      item.programme_id ?? item.programmeId
+                                    ].filter(Boolean)
+                                ).map(String),
+                                semester_id: String(
+                                  item.semester_id ?? item.semesterId ?? ''
+                                ),
+                                year_level:
+                                  item.year_level ?? item.yearLevel ?? 1
+                              })
+                            }}
+                          >
+                            Edit
+                          </button>{' '}
+                          <button
+                            type='button'
+                            className='table-action danger'
+                            onClick={() => setUnitToDelete(item)}
+                            disabled={deleteCourseMutation.isPending}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={canManageUnits ? 7 : 6}>No unit records found.</td>
+                    <td colSpan={canManageUnits ? 7 : 6}>
+                      No unit records found.
+                    </td>
                   </tr>
                 )}
               </tbody>

@@ -646,7 +646,7 @@ textarea {
 }
 
 .scrollable-select-option:hover,
-.scrollable-select-option[aria-selected='true'] {
+.scrollable-select-option[aria-selected="true"] {
   background: var(--surface-muted);
 }
 
