@@ -367,6 +367,28 @@ button {
   min-width: 0;
 }
 
+.schedule-conflict-alert {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #fca5a5;
+  border-left: 4px solid #dc2626;
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: #fff7f7;
+  color: #7f1d1d;
+}
+
+.schedule-conflict-alert strong {
+  color: #991b1b;
+  font-size: 0.9rem;
+}
+
+.schedule-conflict-alert span {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .draft-list-scroll {
   display: grid;
   gap: 10px;

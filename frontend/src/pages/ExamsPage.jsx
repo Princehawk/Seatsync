@@ -875,7 +875,10 @@ export default function ExamsPage () {
             ))}
           </div>
           {pendingSchedule.publishError && (
-            <p className='form-error'>{pendingSchedule.publishError}</p>
+            <div className='schedule-conflict-alert' role='alert'>
+              <strong>Unable to publish these exams</strong>
+              <span>{pendingSchedule.publishError}</span>
+            </div>
           )}
           <button
             type='button'
@@ -1337,7 +1340,12 @@ export default function ExamsPage () {
               </label>
             </div>
 
-            {formError && <p className='form-error'>{formError}</p>}
+            {formError && (
+              <div className='schedule-conflict-alert' role='alert'>
+                <strong>Exam was not staged</strong>
+                <span>{formError}</span>
+              </div>
+            )}
 
             <div className='toolbar-actions'>
               <button

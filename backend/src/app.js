@@ -43,7 +43,7 @@ globalThis.__SEATSYNC_ROOM__ = { joinRoom, leaveRoom }
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 400,
+  max: Number(process.env.API_RATE_LIMIT),
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many requests, please slow down.' }

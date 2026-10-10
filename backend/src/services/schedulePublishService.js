@@ -1,4 +1,5 @@
 import db from '../config/db.js'
+import { assertNoStagedDraftConflict } from './scheduleDraftConflict.js'
 
 const run = async (connection, sql, params = []) => {
   const [rows] = await connection.execute(sql, params)
@@ -19,7 +20,7 @@ const assertNoTimetableConflict = async (
   const end = get(event, 'end_time', 'endTime')
   const venueId = Number(get(event, 'venue_id', 'venueId'))
   const lecturerId = Number(get(event, 'lecturer_id', 'lecturerId'))
-  const exclusion = excludeEntryId ? 'AND id <> ?' : ''
+  const exclusion = excludeEntryId ? 'AND te.id <> ?' : ''
   const exclusionParams = excludeEntryId ? [Number(excludeEntryId)] : []
   const cohortIds = (get(event, 'cohort_ids', 'cohortIds') || [])
     .map(Number)
@@ -86,42 +87,78 @@ const assertNoTimetableConflict = async (
 
   const venueConflicts = await run(
     connection,
-    `SELECT id, start_time, end_time FROM timetable_entries
-    WHERE status = 'SCHEDULED' AND venue_id = ? AND LEFT(UPPER(day_of_week), 3) = ?
-      AND start_time < ? AND end_time > ? ${exclusion} LIMIT 1`,
+    `SELECT te.id, te.start_time, te.end_time, v.name AS venue_name
+    FROM timetable_entries te JOIN venues v ON v.id = te.venue_id
+    WHERE te.status = 'SCHEDULED' AND te.venue_id = ?
+      AND LEFT(UPPER(te.day_of_week), 3) = ?
+      AND te.start_time < ? AND te.end_time > ?
+      ${excludeEntryId ? 'AND te.id <> ?' : ''} LIMIT 1`,
     [venueId, day, end, start, ...exclusionParams]
   )
-  if (venueConflicts.length)
-    throw new Error('A venue is already occupied during this timetable event.')
+  if (venueConflicts.length) {
+    const conflict = venueConflicts[0]
+    throw new Error(
+      `Venue conflict: ${
+        conflict.venue_name || `venue ${venueId}`
+      } already has event #${conflict.id} on ${day}, ${String(
+        conflict.start_time
+      ).slice(0, 5)}–${String(conflict.end_time).slice(
+        0,
+        5
+      )}; proposed event is ${String(start).slice(0, 5)}–${String(end).slice(
+        0,
+        5
+      )}.`
+    )
+  }
 
   const blocked = await run(
     connection,
-    `SELECT id FROM venue_blocks
+    `SELECT id, start_datetime, end_datetime FROM venue_blocks
     WHERE venue_id = ? AND status = 'ACTIVE'
       AND LEFT(UPPER(DAYNAME(start_datetime)), 3) = ?
       AND TIME(start_datetime) < ? AND TIME(end_datetime) > ? LIMIT 1`,
     [venueId, day, end, start]
   )
-  if (blocked.length)
-    throw new Error('A venue is blocked during this timetable event.')
+  if (blocked.length) {
+    const block = blocked[0]
+    throw new Error(
+      `Venue conflict: venue ${venueId} is blocked ${String(
+        block.start_datetime
+      ).slice(11, 16)}–${String(block.end_datetime).slice(
+        11,
+        16
+      )} on ${day}; proposed event is ${String(start).slice(0, 5)}–${String(
+        end
+      ).slice(0, 5)}.`
+    )
+  }
 
   const lecturerRows = await run(
     connection,
-    `SELECT id FROM timetable_entries
-    WHERE status = 'SCHEDULED' AND lecturer_id = ? AND LEFT(UPPER(day_of_week), 3) = ?
-      AND start_time < ? AND end_time > ? ${exclusion} LIMIT 1`,
+    `SELECT te.id, te.start_time, te.end_time FROM timetable_entries te
+    WHERE te.status = 'SCHEDULED' AND te.lecturer_id = ? AND LEFT(UPPER(te.day_of_week), 3) = ?
+      AND te.start_time < ? AND te.end_time > ? ${exclusion} LIMIT 1`,
     [lecturerId, day, end, start, ...exclusionParams]
   )
-  if (lecturerRows.length)
+  if (lecturerRows.length) {
+    const conflict = lecturerRows[0]
     throw new Error(
-      'The lecturer already has a timetable event during this time.'
+      `Lecturer conflict: lecturer ${lecturerId} already has event #${
+        conflict.id
+      } on ${day}, ${String(conflict.start_time).slice(0, 5)}–${String(
+        conflict.end_time
+      ).slice(0, 5)}.`
     )
+  }
 
   if (cohortIds.length) {
     const cohortRows = await run(
       connection,
-      `SELECT te.id FROM timetable_entries te
+      `SELECT te.id, te.start_time, te.end_time, c.name AS cohort_name
+      FROM timetable_entries te
       LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+      LEFT JOIN cohorts c ON c.id = COALESCE(tec.cohort_id, te.cohort_id)
       WHERE te.status = 'SCHEDULED' AND LEFT(UPPER(te.day_of_week), 3) = ?
         AND te.start_time < ? AND te.end_time > ?
         ${excludeEntryId ? 'AND te.id <> ?' : ''}
@@ -129,39 +166,59 @@ const assertNoTimetableConflict = async (
           OR tec.cohort_id IN (${cohortIds.map(() => '?').join(',')})) LIMIT 1`,
       [day, end, start, ...exclusionParams, ...cohortIds, ...cohortIds]
     )
-    if (cohortRows.length)
+    if (cohortRows.length) {
+      const conflict = cohortRows[0]
       throw new Error(
-        'A cohort already has a timetable event during this time.'
+        `Cohort conflict: ${
+          conflict.cohort_name || 'a selected cohort'
+        } already has event #${conflict.id} on ${day}, ${String(
+          conflict.start_time
+        ).slice(0, 5)}–${String(conflict.end_time).slice(0, 5)}.`
       )
+    }
 
     const examCohortRows = await run(
       connection,
-      `SELECT e.id FROM exams e
+      `SELECT e.id, e.start_time, e.end_time, c.name AS cohort_name
+      FROM exams e
       JOIN exam_cohorts ec ON ec.exam_id = e.id
+      JOIN cohorts c ON c.id = ec.cohort_id
       WHERE e.status = 'SCHEDULED' AND LEFT(UPPER(DAYNAME(e.exam_date)), 3) = ?
         AND e.start_time < ? AND e.end_time > ?
         AND ec.cohort_id IN (${cohortIds.map(() => '?').join(',')}) LIMIT 1`,
       [day, end, start, ...cohortIds]
     )
-    if (examCohortRows.length)
+    if (examCohortRows.length) {
+      const conflict = examCohortRows[0]
       throw new Error(
-        'A cohort has an exam on this weekday during the timetable event.'
+        `Cohort conflict: ${
+          conflict.cohort_name || 'a selected cohort'
+        } has exam #${conflict.id} on ${day}, ${String(
+          conflict.start_time
+        ).slice(0, 5)}–${String(conflict.end_time).slice(0, 5)}.`
       )
+    }
   }
 
   const examRows = await run(
     connection,
-    `SELECT e.id FROM exams e
+    `SELECT e.id, e.start_time, e.end_time FROM exams e
     JOIN exam_venue_allocations eva ON eva.exam_id = e.id
     WHERE e.status = 'SCHEDULED' AND eva.venue_id = ?
       AND LEFT(UPPER(DAYNAME(e.exam_date)), 3) = ?
       AND e.start_time < ? AND e.end_time > ? LIMIT 1`,
     [venueId, day, end, start]
   )
-  if (examRows.length)
+  if (examRows.length) {
+    const conflict = examRows[0]
     throw new Error(
-      'An exam already occupies this venue during the timetable event.'
+      `Venue conflict: venue ${venueId} already has exam #${
+        conflict.id
+      } on ${day}, ${String(conflict.start_time).slice(0, 5)}–${String(
+        conflict.end_time
+      ).slice(0, 5)}.`
     )
+  }
 }
 
 const assertNoExamConflict = async (
@@ -175,7 +232,6 @@ const assertNoExamConflict = async (
   const start = get(exam, 'start_time', 'startTime')
   const end = get(exam, 'end_time', 'endTime')
   const courseId = Number(get(exam, 'course_id', 'courseId'))
-  const excludeExamSql = excludeExamId ? 'AND id <> ?' : ''
   const excludeExamParams = excludeExamId ? [Number(excludeExamId)] : []
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
@@ -197,30 +253,45 @@ const assertNoExamConflict = async (
   }
   const unitRows = await run(
     connection,
-    `SELECT id FROM exams WHERE status = 'SCHEDULED'
-    AND course_id = ? AND exam_date = ? AND start_time < ? AND end_time > ?
-    ${excludeExamSql} LIMIT 1`,
+    `SELECT e.id, e.start_time, e.end_time, u.code, u.name
+    FROM exams e LEFT JOIN units u ON u.id = e.course_id
+    WHERE e.status = 'SCHEDULED' AND e.course_id = ? AND e.exam_date = ?
+      AND e.start_time < ? AND e.end_time > ?
+      ${excludeExamId ? 'AND e.id <> ?' : ''} LIMIT 1`,
     [courseId, date, end, start, ...excludeExamParams]
   )
-  if (unitRows.length)
+  if (unitRows.length) {
+    const conflict = unitRows[0]
     throw new Error(
-      'This unit already has an overlapping exam on the selected date.'
+      `Unit conflict: ${
+        conflict.code || `unit ${courseId}`
+      } already has exam #${conflict.id} on ${date}, ${String(
+        conflict.start_time
+      ).slice(0, 5)}–${String(conflict.end_time).slice(0, 5)}.`
     )
+  }
 
   for (const cohortId of uniqueCohortIds) {
     const rows = await run(
       connection,
-      `SELECT e.id FROM exams e
+      `SELECT e.id, e.start_time, e.end_time, c.name AS cohort_name FROM exams e
       JOIN exam_cohorts ec ON ec.exam_id = e.id
+      JOIN cohorts c ON c.id = ec.cohort_id
       WHERE e.status = 'SCHEDULED' AND ec.cohort_id = ? AND e.exam_date = ?
         AND e.start_time < ? AND e.end_time > ?
         ${excludeExamId ? 'AND e.id <> ?' : ''} LIMIT 1`,
       [cohortId, date, end, start, ...excludeExamParams]
     )
-    if (rows.length)
+    if (rows.length) {
+      const conflict = rows[0]
       throw new Error(
-        'A selected cohort already has an overlapping exam on this date.'
+        `Cohort conflict: ${
+          conflict.cohort_name || `cohort ${cohortId}`
+        } already has exam #${conflict.id} on ${date}, ${String(
+          conflict.start_time
+        ).slice(0, 5)}–${String(conflict.end_time).slice(0, 5)}.`
       )
+    }
   }
 
   const weekday = new Date(`${date}T00:00:00Z`)
@@ -229,8 +300,13 @@ const assertNoExamConflict = async (
   const placeholders = uniqueCohortIds.map(() => '?').join(',')
   const timetableCohortRows = await run(
     connection,
-    `SELECT te.id FROM timetable_entries te
+    `SELECT te.id, te.start_time, te.end_time, u.code AS unit_code,
+       v.name AS venue_name, c.name AS cohort_name
+      FROM timetable_entries te
+      LEFT JOIN units u ON u.id = te.course_id
+      LEFT JOIN venues v ON v.id = te.venue_id
       LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+      LEFT JOIN cohorts c ON c.id = COALESCE(tec.cohort_id, te.cohort_id)
       WHERE te.status = 'SCHEDULED'
         AND LEFT(UPPER(te.day_of_week), 3) = ?
         AND te.start_time < ? AND te.end_time > ?
@@ -245,15 +321,24 @@ const assertNoExamConflict = async (
     [weekday, end, start, date, ...uniqueCohortIds, ...uniqueCohortIds]
   )
   if (timetableCohortRows.length) {
+    const conflict = timetableCohortRows[0]
     throw new Error(
-      'A selected cohort has a recurring timetable event during this exam.'
+      `Cohort conflict: ${
+        conflict.cohort_name || 'a selected cohort'
+      } has timetable event #${conflict.id} on ${weekday}, ${String(
+        conflict.start_time
+      ).slice(0, 5)}–${String(conflict.end_time).slice(0, 5)}${
+        conflict.unit_code ? ` (${conflict.unit_code})` : ''
+      }.`
     )
   }
   const cohortOverrideRows = await run(
     connection,
-    `SELECT te.id FROM schedule_overrides so
+    `SELECT te.id, so.new_start_time, so.new_end_time, c.name AS cohort_name
+      FROM schedule_overrides so
       JOIN timetable_entries te ON te.id = so.timetable_entry_id
       LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
+      LEFT JOIN cohorts c ON c.id = COALESCE(tec.cohort_id, te.cohort_id)
       WHERE so.status = 'APPROVED' AND so.effective_date = ?
         AND so.new_start_time < ? AND so.new_end_time > ?
         AND (te.cohort_id IN (${placeholders})
@@ -262,14 +347,25 @@ const assertNoExamConflict = async (
     [date, end, start, ...uniqueCohortIds, ...uniqueCohortIds]
   )
   if (cohortOverrideRows.length) {
-    throw new Error('A selected cohort has a make-up class during this exam.')
+    const conflict = cohortOverrideRows[0]
+    throw new Error(
+      `Cohort conflict: ${
+        conflict.cohort_name || 'a selected cohort'
+      } has make-up class ${String(conflict.new_start_time).slice(
+        0,
+        5
+      )}–${String(conflict.new_end_time).slice(0, 5)} on ${date}.`
+    )
   }
 
   for (const allocation of venueAllocations) {
     const venueId = Number(get(allocation, 'venue_id', 'venueId'))
     const rows = await run(
       connection,
-      `SELECT te.id FROM timetable_entries te WHERE te.status = 'SCHEDULED'
+      `SELECT te.id, te.start_time, te.end_time, u.code AS unit_code
+      FROM timetable_entries te
+      LEFT JOIN units u ON u.id = te.course_id
+      WHERE te.status = 'SCHEDULED'
       AND te.venue_id = ? AND LEFT(UPPER(te.day_of_week), 3) = ?
       AND te.start_time < ? AND te.end_time > ?
       AND NOT EXISTS (
@@ -279,30 +375,50 @@ const assertNoExamConflict = async (
       ) LIMIT 1`,
       [venueId, weekday, end, start, date]
     )
-    if (rows.length)
+    if (rows.length) {
+      const conflict = rows[0]
       throw new Error(
-        'A selected venue has a recurring timetable event during the exam.'
+        `Venue conflict: venue ${venueId} has timetable event #${
+          conflict.id
+        } on ${weekday}, ${String(conflict.start_time).slice(0, 5)}–${String(
+          conflict.end_time
+        ).slice(0, 5)}${conflict.unit_code ? ` (${conflict.unit_code})` : ''}.`
       )
+    }
     const overrideRows = await run(
       connection,
-      `SELECT id FROM schedule_overrides
+      `SELECT id, new_start_time, new_end_time FROM schedule_overrides
        WHERE status = 'APPROVED' AND effective_date = ? AND new_venue_id = ?
          AND new_start_time < ? AND new_end_time > ? LIMIT 1`,
       [date, venueId, end, start]
     )
-    if (overrideRows.length)
-      throw new Error('A selected venue has a make-up class during the exam.')
+    if (overrideRows.length) {
+      const conflict = overrideRows[0]
+      throw new Error(
+        `Venue conflict: venue ${venueId} has make-up class ${String(
+          conflict.new_start_time
+        ).slice(0, 5)}–${String(conflict.new_end_time).slice(0, 5)} on ${date}.`
+      )
+    }
     const examRows = await run(
       connection,
-      `SELECT e.id FROM exams e
+      `SELECT e.id, e.start_time, e.end_time FROM exams e
       JOIN exam_venue_allocations eva ON eva.exam_id = e.id
       WHERE e.status = 'SCHEDULED' AND eva.venue_id = ? AND e.exam_date = ?
         AND e.start_time < ? AND e.end_time > ?
         ${excludeExamId ? 'AND e.id <> ?' : ''} LIMIT 1`,
       [venueId, date, end, start, ...excludeExamParams]
     )
-    if (examRows.length)
-      throw new Error('A selected venue already has an overlapping exam.')
+    if (examRows.length) {
+      const conflict = examRows[0]
+      throw new Error(
+        `Venue conflict: venue ${venueId} already has exam #${
+          conflict.id
+        } on ${date}, ${String(conflict.start_time).slice(0, 5)}–${String(
+          conflict.end_time
+        ).slice(0, 5)}.`
+      )
+    }
     const venue = (
       await run(connection, 'SELECT capacity FROM venues WHERE id = ?', [
         venueId
@@ -328,11 +444,151 @@ const assertNoExamConflict = async (
   }
 }
 
-export const publishScheduleDrafts = async (drafts, actor) => {
+export const validateScheduleDraft = async (draft, pendingDrafts, actor) => {
+  if (
+    !draft ||
+    !['timetable', 'timetable_update', 'exam', 'exam_update'].includes(
+      draft.kind
+    )
+  ) {
+    throw new Error('Select a valid timetable event or exam draft.')
+  }
+  assertNoStagedDraftConflict(draft, pendingDrafts)
+
+  const payload = draft.payload || {}
+  const connection = await db.getConnection()
+  try {
+    await connection.beginTransaction()
+    if (draft.kind === 'timetable' || draft.kind === 'timetable_update') {
+      if (
+        draft.kind === 'timetable_update' &&
+        !(actor?.roles || []).includes('ADMIN')
+      ) {
+        throw new Error('Only administrators may stage timetable edits.')
+      }
+      const entryId = Number(
+        payload.timetable_entry_id ?? payload.timetableEntryId
+      )
+      if (draft.kind === 'timetable_update' && entryId) {
+        const rows = await run(
+          connection,
+          'SELECT id FROM timetable_entries WHERE id = ?',
+          [entryId]
+        )
+        if (!rows.length)
+          throw new Error('The timetable event no longer exists.')
+      }
+      const lecturerId = Number(get(payload, 'lecturer_id', 'lecturerId'))
+      if ((actor?.roles || []).includes('LECTURER')) {
+        const rows = await run(
+          connection,
+          'SELECT user_id FROM lecturers WHERE id = ?',
+          [lecturerId]
+        )
+        if (Number(rows[0]?.user_id) !== Number(actor.id)) {
+          throw new Error(
+            'Lecturers may only stage their own timetable events.'
+          )
+        }
+      }
+      await assertNoTimetableConflict(
+        connection,
+        payload,
+        draft.kind === 'timetable_update' ? entryId : null
+      )
+    } else {
+      if (!(actor?.roles || []).includes('ADMIN')) {
+        throw new Error('Only administrators may stage exams.')
+      }
+      const examId = Number(payload.exam_id ?? payload.examId)
+      if (draft.kind === 'exam_update') {
+        if (!examId) throw new Error('The exam edit is missing its exam ID.')
+        const rows = await run(
+          connection,
+          "SELECT id FROM exams WHERE id = ? AND status = 'SCHEDULED'",
+          [examId]
+        )
+        if (!rows.length)
+          throw new Error('The scheduled exam no longer exists.')
+      }
+      const cohortAllocations = payload.cohort_allocations || []
+      const venueAllocations = payload.venue_allocations || []
+      const cohortIds = cohortAllocations
+        .map(item => Number(get(item, 'cohort_id', 'cohortId')))
+        .filter(Boolean)
+      if (!cohortIds.length || !venueAllocations.length) {
+        throw new Error(
+          'Each exam needs at least one cohort and venue allocation.'
+        )
+      }
+      const [academicRows, semesterRows, unitRows] = await Promise.all([
+        run(connection, 'SELECT id FROM academic_years WHERE id = ?', [
+          Number(get(payload, 'academic_year_id', 'academicYearId'))
+        ]),
+        run(
+          connection,
+          'SELECT id FROM semesters WHERE id = ? AND academic_year_id = ?',
+          [
+            Number(get(payload, 'semester_id', 'semesterId')),
+            Number(get(payload, 'academic_year_id', 'academicYearId'))
+          ]
+        ),
+        run(connection, 'SELECT id FROM units WHERE id = ?', [
+          Number(get(payload, 'course_id', 'courseId'))
+        ])
+      ])
+      if (!academicRows.length || !semesterRows.length || !unitRows.length) {
+        throw new Error('The exam academic year, semester, or unit is invalid.')
+      }
+      const cohortStudents = cohortAllocations.reduce(
+        (total, item) =>
+          total + Number(get(item, 'student_count', 'studentCount') || 0),
+        0
+      )
+      const venueStudents = venueAllocations.reduce(
+        (total, item) =>
+          total + Number(get(item, 'student_count', 'studentCount') || 0),
+        0
+      )
+      if (venueStudents < cohortStudents) {
+        throw new Error(
+          `Venue allocations cover ${venueStudents} students, but the selected cohorts contain ${cohortStudents}.`
+        )
+      }
+      await assertNoExamConflict(
+        connection,
+        payload,
+        cohortIds,
+        venueAllocations,
+        draft.kind === 'exam_update' ? examId : null
+      )
+    }
+    await connection.rollback()
+    return { valid: true }
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
+export const publishScheduleDrafts = async (
+  drafts,
+  actor,
+  pendingDrafts = drafts
+) => {
   if (!Array.isArray(drafts) || !drafts.length)
     throw new Error('There are no pending schedule items to publish.')
   if (drafts.length > 100)
     throw new Error('Publish up to 100 schedule items at a time.')
+  const otherDrafts = Array.isArray(pendingDrafts) ? pendingDrafts : drafts
+  for (const draft of drafts) {
+    assertNoStagedDraftConflict(
+      draft,
+      otherDrafts.filter(other => other?.id !== draft?.id)
+    )
+  }
 
   const connection = await db.getConnection()
   try {

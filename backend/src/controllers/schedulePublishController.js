@@ -1,9 +1,29 @@
-import { publishScheduleDrafts } from '../services/schedulePublishService.js'
+import {
+  publishScheduleDrafts,
+  validateScheduleDraft
+} from '../services/schedulePublishService.js'
 import { emitSocketEvent } from '../socket/socketEvents.js'
+
+export const validateScheduleDraftController = async (req, res) => {
+  try {
+    await validateScheduleDraft(
+      req.body?.draft,
+      req.body?.pendingDrafts,
+      req.user
+    )
+    return res.json({ valid: true })
+  } catch (error) {
+    return res.status(409).json({ valid: false, message: error.message })
+  }
+}
 
 export const publishScheduleDraftsController = async (req, res) => {
   try {
-    const data = await publishScheduleDrafts(req.body?.drafts, req.user)
+    const data = await publishScheduleDrafts(
+      req.body?.drafts,
+      req.user,
+      req.body?.pendingDrafts
+    )
     if (data?.length) {
       console.info('[SCHEDULE][PUBLISHED]', JSON.stringify(data))
       emitSocketEvent('timetable:changed', {
