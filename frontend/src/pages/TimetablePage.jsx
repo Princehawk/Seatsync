@@ -221,7 +221,7 @@ export default function TimetablePage () {
 
   useEffect(() => {
     if (!formError) return undefined
-    const timeout = setTimeout(() => setFormError(''), 5000)
+    const timeout = setTimeout(() => setFormError(''), 10000)
     return () => clearTimeout(timeout)
   }, [formError])
 
@@ -864,11 +864,22 @@ export default function TimetablePage () {
       academic_year_id: Number(form.academic_year_id) || null,
       semester_id: Number(form.semester_id) || null,
       course_id: Number(form.course_id),
+      unit_name:
+        courses.find(item => String(item.id) === String(form.course_id))
+          ?.name || `Unit ${form.course_id}`,
       programme_ids: form.programme_ids.map(Number),
       cohort_ids: form.cohort_ids.map(Number),
+      cohort_names: selectedCohorts.map(cohort => ({
+        id: Number(cohort.id),
+        name: cohort.name
+      })),
       cohort_id: Number(form.cohort_ids[0]) || null,
       lecturer_id: Number(form.lecturer_id),
       venue_id: Number(form.venue_id),
+      venue_name:
+        selectedVenue?.name ||
+        selectedVenue?.venue_name ||
+        `Venue ${form.venue_id}`,
       expected_students: expectedStudents,
       venue_capacity: venueCapacity
     }
@@ -1265,7 +1276,7 @@ export default function TimetablePage () {
           </div>
           {pendingSchedule.publishError && (
             <div className='schedule-conflict-alert' role='alert'>
-              <strong>Unable to publish these timetable items</strong>
+              <strong>Schedule conflict</strong>
               <span>{pendingSchedule.publishError}</span>
             </div>
           )}
@@ -1610,7 +1621,7 @@ export default function TimetablePage () {
 
             {formError && (
               <div className='schedule-conflict-alert' role='alert'>
-                <strong>Timetable item was not staged</strong>
+                <strong>Schedule conflict</strong>
                 <span>{formError}</span>
               </div>
             )}

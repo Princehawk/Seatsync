@@ -20,7 +20,7 @@ export const listTimetableEntries = async user => {
   const entries = (
     await rawQuery(
       `
-    SELECT te.*,
+    SELECT te.*, te.unit_id AS course_id,
       MAX(u.code) AS unit_code,
       MAX(u.name) AS unit_name,
       MAX(CONCAT_WS(' ', NULLIF(lu.first_name, ''), NULLIF(lu.last_name, ''))) AS lecturer_name,
@@ -31,7 +31,7 @@ export const listTimetableEntries = async user => {
       GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids,
       GROUP_CONCAT(DISTINCT tep.programme_id) AS programme_ids
     FROM timetable_entries te
-    LEFT JOIN units u ON u.id = te.course_id
+    LEFT JOIN units u ON u.id = te.unit_id
     LEFT JOIN lecturers l ON l.id = te.lecturer_id
     LEFT JOIN users lu ON lu.id = l.user_id
     LEFT JOIN venues v ON v.id = te.venue_id
@@ -62,7 +62,7 @@ export const listTimetableEntries = async user => {
   }))
   const overrides = await rawQuery(
     `SELECT so.*, DATE_FORMAT(so.effective_date, '%Y-%m-%d') AS effective_date,
-       te.academic_year_id, te.semester_id, te.course_id,
+      te.academic_year_id, te.semester_id, te.unit_id AS course_id,
        te.lecturer_id, te.event_type, te.status AS recurring_status,
        te.cohort_id, u.code AS unit_code, u.name AS unit_name,
        v.name AS venue_name, v.code AS venue_code,
@@ -70,7 +70,7 @@ export const listTimetableEntries = async user => {
        GROUP_CONCAT(DISTINCT tep.programme_id) AS programme_ids
      FROM schedule_overrides so
      JOIN timetable_entries te ON te.id = so.timetable_entry_id
-     JOIN units u ON u.id = te.course_id
+    JOIN units u ON u.id = te.unit_id
      JOIN venues v ON v.id = so.new_venue_id
      LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
      LEFT JOIN timetable_entry_programmes tep ON tep.timetable_entry_id = te.id
@@ -254,7 +254,7 @@ export const createTimetableEntry = async payload => {
   const record = await createRow('timetable_entries', {
     academic_year_id: payload.academic_year_id,
     semester_id: payload.semester_id,
-    course_id: payload.course_id,
+    unit_id: payload.course_id,
     cohort_id: cohortIds[0],
     lecturer_id: payload.lecturer_id,
     venue_id: payload.venue_id,
@@ -289,10 +289,15 @@ export const updateTimetableEntry = async (id, updates) => {
     cohort_ids: cohortIds = [],
     ...fields
   } = updates
+  const dbFields = { ...fields }
+  if (dbFields.course_id !== undefined) {
+    dbFields.unit_id = dbFields.course_id
+    delete dbFields.course_id
+  }
   const allowedFields = [
     'academic_year_id',
     'semester_id',
-    'course_id',
+    'unit_id',
     'cohort_id',
     'lecturer_id',
     'venue_id',
@@ -304,7 +309,7 @@ export const updateTimetableEntry = async (id, updates) => {
     'updated_by'
   ]
   const safeFields = Object.fromEntries(
-    Object.entries(fields).filter(([key]) => allowedFields.includes(key))
+    Object.entries(dbFields).filter(([key]) => allowedFields.includes(key))
   )
   const connection = await db.getConnection()
   try {

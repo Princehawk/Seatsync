@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import SearchableSelect from './SearchableSelect'
 
 const getColumnValue = (record, column) =>
   column.value ? column.value(record) : record[column.key]
@@ -7,7 +8,9 @@ export default function AcademicRecordsTable ({
   title,
   records = [],
   columns = [],
-  filters = []
+  filters = [],
+  onEdit,
+  onDelete
 }) {
   const [search, setSearch] = useState('')
   const [filterValues, setFilterValues] = useState({})
@@ -65,26 +68,46 @@ export default function AcademicRecordsTable ({
             placeholder={`Search ${title.toLowerCase()}`}
             aria-label={`Search ${title.toLowerCase()}`}
           />
-          {filters.map(filter => (
-            <select
-              key={filter.key}
-              value={filterValues[filter.key] || 'all'}
-              onChange={event =>
-                setFilterValues(current => ({
-                  ...current,
-                  [filter.key]: event.target.value
-                }))
-              }
-              aria-label={`Filter ${title.toLowerCase()} by ${filter.label.toLowerCase()}`}
-            >
-              <option value='all'>All {filter.label.toLowerCase()}</option>
-              {filter.options.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ))}
+          {filters.map(filter =>
+            filter.searchable ? (
+              <SearchableSelect
+                key={filter.key}
+                options={[
+                  { value: 'all', label: `All ${filter.label.toLowerCase()}` },
+                  ...filter.options
+                ]}
+                value={filterValues[filter.key] || 'all'}
+                onChange={value =>
+                  setFilterValues(current => ({
+                    ...current,
+                    [filter.key]: value
+                  }))
+                }
+                placeholder={`All ${filter.label.toLowerCase()}`}
+                searchPlaceholder={`Search ${filter.label.toLowerCase()}`}
+                ariaLabel={`Filter ${title.toLowerCase()} by ${filter.label.toLowerCase()}`}
+              />
+            ) : (
+              <select
+                key={filter.key}
+                value={filterValues[filter.key] || 'all'}
+                onChange={event =>
+                  setFilterValues(current => ({
+                    ...current,
+                    [filter.key]: event.target.value
+                  }))
+                }
+                aria-label={`Filter ${title.toLowerCase()} by ${filter.label.toLowerCase()}`}
+              >
+                <option value='all'>All {filter.label.toLowerCase()}</option>
+                {filter.options.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            )
+          )}
           <select
             value={sortBy}
             onChange={event => setSortBy(event.target.value)}
@@ -119,6 +142,9 @@ export default function AcademicRecordsTable ({
               {columns.map(column => (
                 <th key={column.key}>{column.label}</th>
               ))}
+              {(onEdit || onDelete) && (
+                <th className='academic-record-actions-heading'>Actions</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -139,11 +165,33 @@ export default function AcademicRecordsTable ({
                       </td>
                     )
                   })}
+                  {(onEdit || onDelete) && (
+                    <td className='academic-record-actions'>
+                      {onEdit && (
+                        <button
+                          type='button'
+                          className='table-action'
+                          onClick={() => onEdit(record)}
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          type='button'
+                          className='table-action danger'
+                          onClick={() => onDelete(record)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={columns.length}>
+                <td colSpan={columns.length + (onEdit || onDelete ? 1 : 0)}>
                   No {title.toLowerCase()} match.
                 </td>
               </tr>

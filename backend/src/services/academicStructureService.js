@@ -104,6 +104,7 @@ const toDateString = value => {
 export const listFaculties = async () =>
   (await listRows('faculties')).map(serialize)
 export const createFaculty = async payload => {
+  await validateAcademicDuplicate('faculty', payload)
   const row = await createRow('faculties', payload)
   return row ? serialize(row) : null
 }
@@ -119,6 +120,7 @@ export const updateFaculty = async (id, updates) => {
 export const listDepartments = async () =>
   (await listRows('departments')).map(serialize)
 export const createDepartment = async payload => {
+  await validateAcademicDuplicate('department', payload)
   const row = await createRow('departments', payload)
   return row ? serialize(row) : null
 }
@@ -134,6 +136,7 @@ export const updateDepartment = async (id, updates) => {
 export const listProgrammes = async () =>
   (await listRows('programmes')).map(serialize)
 export const createProgramme = async payload => {
+  await validateAcademicDuplicate('programme', payload)
   const row = await createRow('programmes', payload)
   return row ? serialize(row) : null
 }
@@ -150,6 +153,7 @@ export const listAcademicYears = async () =>
   (await listRows('academic_years')).map(serialize)
 export const createAcademicYear = async payload => {
   const normalizedPayload = normalizeAcademicYearPayload(payload)
+  await validateAcademicDuplicate('academicYear', normalizedPayload)
   const row = await createRow('academic_years', normalizedPayload)
   return row ? serialize(row) : null
 }
@@ -166,6 +170,7 @@ export const listSemesters = async () =>
   (await listRows('semesters')).map(serialize)
 export const createSemester = async payload => {
   const normalizedPayload = normalizeSemesterPayload(payload)
+  await validateAcademicDuplicate('semester', normalizedPayload)
   if (!normalizedPayload.academic_year_id) {
     throw new Error('An academic year is required before creating a semester.')
   }
@@ -219,6 +224,197 @@ export const getSemester = async id => {
 export const updateSemester = async (id, updates) => {
   const row = await updateRow('semesters', id, updates)
   return row ? serialize(row) : null
+}
+
+const duplicateRules = {
+  faculty: {
+    table: 'faculties',
+    fields: ['name', 'code']
+  },
+  department: {
+    table: 'departments',
+    fields: ['name', 'code']
+  },
+  programme: {
+    table: 'programmes',
+    fields: ['name', 'code']
+  },
+  academicYear: {
+    table: 'academic_years',
+    fields: ['name']
+  },
+  semester: {
+    table: 'semesters',
+    fields: ['name', 'number'],
+    scope: ['academic_year_id']
+  },
+  cohort: {
+    table: 'cohorts',
+    fields: ['name'],
+    scope: ['programme_id', 'academic_year_id']
+  },
+  unit: {
+    table: 'units',
+    fields: ['name', 'code']
+  }
+}
+
+export const validateAcademicDuplicate = async (
+  entity,
+  payload,
+  excludeId = null
+) => {
+  const rule = duplicateRules[entity]
+  if (!rule) throw new Error('Unknown academic record type.')
+  const values = { ...payload }
+  if (entity === 'academicYear')
+    Object.assign(values, normalizeAcademicYearPayload(payload))
+  if (entity === 'semester')
+    Object.assign(values, normalizeSemesterPayload(payload))
+  const fieldPredicates = []
+  const fieldParams = []
+  for (const field of rule.fields) {
+    const value = values[field]
+    if (value === undefined || value === null || String(value).trim() === '')
+      continue
+    fieldPredicates.push(
+      `LOWER(TRIM(CAST(\`${field}\` AS CHAR))) = LOWER(TRIM(?))`
+    )
+    fieldParams.push(String(value).trim())
+  }
+  if (!fieldPredicates.length) return
+  const predicates = [`(${fieldPredicates.join(' OR ')})`]
+  const params = [...fieldParams]
+  for (const field of rule.scope || []) {
+    const value = values[field]
+    if (value === undefined || value === null || value === '') continue
+    predicates.push(`\`${field}\` = ?`)
+    params.push(Number(value))
+  }
+  if (excludeId) {
+    predicates.push('id <> ?')
+    params.push(Number(excludeId))
+  }
+  const matches = await rawQuery(
+    `SELECT id, name, code FROM \`${rule.table}\` WHERE ${predicates.join(
+      ' AND '
+    )} LIMIT 1`,
+    params
+  )
+  if (matches[0]) {
+    const duplicate = matches[0]
+    const codeMatch =
+      duplicate.code &&
+      String(values.code || '')
+        .trim()
+        .toLowerCase() === String(duplicate.code).trim().toLowerCase()
+    throw new Error(
+      `${entity === 'academicYear' ? 'Academic year' : entity} ${
+        codeMatch ? `code "${duplicate.code}"` : `name "${duplicate.name}"`
+      } already exists.`
+    )
+  }
+}
+
+export const updateAcademicRecord = async (entity, id, payload) => {
+  await validateAcademicDuplicate(entity, payload, id)
+  const updates = {
+    faculty: updateFaculty,
+    department: updateDepartment,
+    programme: updateProgramme,
+    academicYear: updateAcademicYear,
+    semester: updateSemester,
+    cohort: updateCohort
+  }[entity]
+  if (!updates) throw new Error('Unknown academic record type.')
+  if (entity === 'academicYear') {
+    return updates(id, normalizeAcademicYearPayload(payload))
+  }
+  if (entity === 'semester') {
+    return updates(id, normalizeSemesterPayload(payload))
+  }
+  return updates(id, payload)
+}
+
+const academicDeleteReferences = {
+  faculty: [
+    ['departments', 'faculty_id'],
+    ['lecturer_faculties', 'faculty_id']
+  ],
+  department: [
+    ['programmes', 'department_id'],
+    ['units', 'department_id'],
+    ['unit_departments', 'department_id'],
+    ['lecturers', 'department_id'],
+    ['lecturer_departments', 'department_id']
+  ],
+  programme: [
+    ['cohorts', 'programme_id'],
+    ['students', 'programme_id'],
+    ['unit_programmes', 'programme_id'],
+    ['lecturer_programmes', 'programme_id']
+  ],
+  academicYear: [
+    ['semesters', 'academic_year_id'],
+    ['cohorts', 'academic_year_id'],
+    ['timetable_entries', 'academic_year_id'],
+    ['exams', 'academic_year_id'],
+    ['academic_events', 'academic_year_id']
+  ],
+  semester: [
+    ['units', 'semester_id'],
+    ['timetable_entries', 'semester_id'],
+    ['exams', 'semester_id'],
+    ['academic_events', 'semester_id'],
+    ['cohort_courses', 'semester_id']
+  ],
+  cohort: [
+    ['students', 'cohort_id'],
+    ['timetable_entry_cohorts', 'cohort_id'],
+    ['timetable_entries', 'cohort_id'],
+    ['exam_cohorts', 'cohort_id'],
+    ['cohort_courses', 'cohort_id'],
+    ['cohort_representatives', 'cohort_id'],
+    ['academic_events', 'cohort_id']
+  ],
+  unit: [
+    ['timetable_entries', 'unit_id'],
+    ['exams', 'unit_id'],
+    ['academic_events', 'unit_id'],
+    ['cohort_courses', 'unit_id'],
+    ['unit_departments', 'unit_id'],
+    ['unit_programmes', 'unit_id'],
+    ['lecturer_units', 'unit_id']
+  ]
+}
+
+export const getAcademicDeleteBlockers = async (entity, id) => {
+  const references = academicDeleteReferences[entity]
+  if (!references) throw new Error('Unknown academic record type.')
+  const blockers = {}
+  for (const [table, column] of references) {
+    const [row] = await rawQuery(
+      `SELECT COUNT(*) AS total FROM \`${table}\` WHERE \`${column}\` = ?`,
+      [Number(id)]
+    )
+    if (Number(row?.total || 0) > 0) blockers[table] = Number(row.total)
+  }
+  return blockers
+}
+
+export const deleteAcademicRecord = async (entity, id) => {
+  const table = duplicateRules[entity]?.table
+  if (!table) throw new Error('Unknown academic record type.')
+  const blockers = await getAcademicDeleteBlockers(entity, id)
+  if (Object.keys(blockers).length) {
+    const references = Object.entries(blockers)
+      .map(([name, count]) => `${count} ${name.replaceAll('_', ' ')}`)
+      .join(', ')
+    throw new Error(
+      `Cannot delete this ${entity}: it is used by ${references}.`
+    )
+  }
+  return deleteRow(table, id)
 }
 
 const pageOptions = ({ page = 1, limit = 20 } = {}) => {
@@ -287,6 +483,7 @@ export const listCohorts = async options => {
   }
 }
 export const createCohort = async payload => {
+  await validateAcademicDuplicate('cohort', payload)
   const row = await createRow('cohorts', payload)
   return row ? serialize(row) : null
 }
@@ -504,6 +701,7 @@ export const createCourse = async payload => {
     : normalizedPayload.department_id
     ? [Number(normalizedPayload.department_id)]
     : []
+  await validateAcademicDuplicate('unit', normalizedPayload)
   delete normalizedPayload.programme_ids
   delete normalizedPayload.programme_id
   delete normalizedPayload.department_ids
@@ -571,6 +769,7 @@ export const updateCourse = async (id, updates) => {
   delete normalizedPayload.programme_id
   delete normalizedPayload.department_ids
   delete normalizedPayload.department_id
+  await validateAcademicDuplicate('unit', normalizedPayload, id)
   if (hasDepartmentUpdate)
     normalizedPayload.department_id = departmentIds[0] || null
 

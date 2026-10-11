@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import PaginationControls from '../components/PaginationControls'
+import SearchableSelect from '../components/SearchableSelect'
 import { useAuth } from '../context/AuthContext'
 
 const toArray = value => {
@@ -201,25 +202,25 @@ export default function CohortsPage () {
               </label>
               <label>
                 Programme
-                <select
+                <SearchableSelect
+                  options={[
+                    { value: '', label: 'Select programme' },
+                    ...(programmes || []).map(programme => ({
+                      value: programme.id ?? programme.code,
+                      label: programme.name || programme.code
+                    }))
+                  ]}
                   value={form.programme_id}
-                  onChange={event =>
+                  onChange={value =>
                     setForm(current => ({
                       ...current,
-                      programme_id: event.target.value
+                      programme_id: value
                     }))
                   }
-                >
-                  <option value=''>Select programme</option>
-                  {(programmes || []).map(programme => (
-                    <option
-                      key={programme.id ?? programme.code}
-                      value={programme.id ?? programme.code}
-                    >
-                      {programme.name || programme.code}
-                    </option>
-                  ))}
-                </select>
+                  placeholder='Select programme'
+                  searchPlaceholder='Search programmes'
+                  ariaLabel='Search cohort programmes'
+                />
               </label>
               <label>
                 Academic year
@@ -292,20 +293,23 @@ export default function CohortsPage () {
             }}
             placeholder='Search cohorts'
           />
-          <select
+          <SearchableSelect
+            options={[
+              { value: 'all', label: 'All programmes' },
+              ...programmes.map(item => ({
+                value: item.id,
+                label: item.name || item.code
+              }))
+            ]}
             value={programmeFilter}
-            onChange={event => {
-              setProgrammeFilter(event.target.value)
+            onChange={value => {
+              setProgrammeFilter(value)
               setPage(1)
             }}
-          >
-            <option value='all'>All programmes</option>
-            {programmes.map(item => (
-              <option key={item.id} value={item.id}>
-                {item.name || item.code}
-              </option>
-            ))}
-          </select>
+            placeholder='All programmes'
+            searchPlaceholder='Search programmes'
+            ariaLabel='Search cohort programme filters'
+          />
           <select
             value={yearFilter}
             onChange={event => {
@@ -523,22 +527,25 @@ export default function CohortsPage () {
                 </label>
                 <label>
                   Programme
-                  <select
+                  <SearchableSelect
+                    options={[
+                      { value: '', label: 'Select programme' },
+                      ...programmes.map(item => ({
+                        value: item.id,
+                        label: item.name || item.code
+                      }))
+                    ]}
                     value={editForm.programme_id}
-                    onChange={event =>
+                    onChange={value =>
                       setEditForm(current => ({
                         ...current,
-                        programme_id: event.target.value
+                        programme_id: value
                       }))
                     }
-                  >
-                    <option value=''>Select programme</option>
-                    {programmes.map(item => (
-                      <option key={item.id} value={item.id}>
-                        {item.name || item.code}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder='Select programme'
+                    searchPlaceholder='Search programmes'
+                    ariaLabel='Search cohort programmes'
+                  />
                 </label>
                 <label>
                   Academic year

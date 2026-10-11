@@ -105,8 +105,8 @@ export const createExam = async payload => {
   const existingUnitExam = await query(
     `SELECT e.start_time, e.end_time, u.code, u.name
      FROM exams e
-     LEFT JOIN units u ON u.id = e.course_id
-     WHERE e.course_id = ?
+    LEFT JOIN units u ON u.id = e.unit_id
+    WHERE e.unit_id = ?
        AND e.exam_date = ?
        AND e.start_time < ?
        AND e.end_time > ?
@@ -241,7 +241,7 @@ export const createExam = async payload => {
   const exam = await createRow('exams', {
     academic_year_id: Number(academicYearId),
     semester_id: Number(semesterId),
-    course_id: Number(courseId),
+    unit_id: Number(courseId),
     exam_date: examDate,
     start_time: startTime,
     end_time: endTime,
@@ -372,7 +372,7 @@ export const updateExam = async (id, payload) => {
       )
     }
     const [changedUnit] = await connection.execute(
-      `SELECT id FROM exams WHERE status = 'SCHEDULED' AND course_id = ? AND exam_date = ?
+      `SELECT id FROM exams WHERE status = 'SCHEDULED' AND unit_id = ? AND exam_date = ?
        AND start_time < ? AND end_time > ? AND id <> ? LIMIT 1`,
       [courseId, date, endTime, startTime, id]
     )
@@ -483,7 +483,7 @@ export const updateExam = async (id, payload) => {
     }
 
     await connection.execute(
-      `UPDATE exams SET academic_year_id = ?, semester_id = ?, course_id = ?,
+      `UPDATE exams SET academic_year_id = ?, semester_id = ?, unit_id = ?,
       exam_date = ?, start_time = ?, end_time = ?, duration_minutes = ?, instructions = ?, updated_by = ?
       WHERE id = ?`,
       [
@@ -542,6 +542,60 @@ export const updateExam = async (id, payload) => {
       valid: false,
       conflicts: [{ type: 'EXAM_UPDATE_CONFLICT', message: error.message }]
     }
+  } finally {
+    connection.release()
+  }
+}
+
+export const deleteExam = async (id, actor) => {
+  const connection = await db.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [examRows] = await connection.execute(
+      `SELECT e.*, u.code AS unit_code, u.name AS unit_name
+      FROM exams e LEFT JOIN units u ON u.id = e.unit_id
+       WHERE e.id = ? FOR UPDATE`,
+      [Number(id)]
+    )
+    if (!examRows.length) {
+      await connection.rollback()
+      return null
+    }
+    const [cohortRows] = await connection.execute(
+      `SELECT ec.cohort_id, c.name AS cohort_name, ec.student_count
+       FROM exam_cohorts ec JOIN cohorts c ON c.id = ec.cohort_id
+       WHERE ec.exam_id = ?`,
+      [Number(id)]
+    )
+    const [venueRows] = await connection.execute(
+      `SELECT eva.venue_id, v.name AS venue_name, eva.allocated_capacity,
+        eva.student_count
+       FROM exam_venue_allocations eva JOIN venues v ON v.id = eva.venue_id
+       WHERE eva.exam_id = ?`,
+      [Number(id)]
+    )
+    const exam = examRows[0]
+    const oldValues = {
+      ...exam,
+      cohort_allocations: cohortRows,
+      venue_allocations: venueRows
+    }
+    await connection.execute(
+      `INSERT INTO audit_logs
+       (user_id, action, entity_type, entity_id, old_values, reason)
+       VALUES (?, 'DELETE', 'exam', ?, ?, 'Exam deleted by administrator')`,
+      [Number(actor?.id) || null, Number(id), JSON.stringify(oldValues)]
+    )
+    await connection.execute('DELETE FROM exams WHERE id = ?', [Number(id)])
+    await connection.commit()
+    return {
+      id: Number(id),
+      unitCode: exam.unit_code,
+      unitName: exam.unit_name
+    }
+  } catch (error) {
+    await connection.rollback()
+    throw error
   } finally {
     connection.release()
   }

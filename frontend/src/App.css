@@ -502,11 +502,14 @@ button {
 .compact-table-header {
   align-items: flex-start;
   flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .compact-table-filters {
   flex: 1 1 520px;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .compact-table-filters input,
@@ -518,7 +521,8 @@ button {
 .academic-builder-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  padding-top: 14px;
 }
 
 .academic-section-switcher {
@@ -543,6 +547,72 @@ button {
 
 .academic-builder-form .form-grid label {
   gap: 6px;
+}
+
+.searchable-select {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.searchable-select-trigger {
+  width: 100%;
+  text-align: left;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.searchable-select-menu {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 8px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+
+.searchable-select-menu input {
+  width: 100%;
+  min-width: 0;
+}
+
+.searchable-select-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.searchable-select-option {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+}
+
+.searchable-select-option:hover,
+.searchable-select-option:focus-visible {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
+.searchable-select-empty {
+  color: var(--muted);
+  padding: 0.6rem 0.2rem;
 }
 
 .academic-records-grid {
@@ -573,6 +643,24 @@ button {
 }
 
 @media (max-width: 1024px) {
+  .academic-records-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-table-header {
+    gap: 6px;
+  }
+
+  .compact-table-filters {
+    width: 100%;
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
+  .compact-table-filters > * {
+    flex: 1 1 180px;
+  }
+
   .app-shell,
   .app-shell.sidebar-collapsed {
     grid-template-columns: 84px minmax(0, 1fr);

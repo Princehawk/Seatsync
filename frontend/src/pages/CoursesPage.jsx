@@ -64,6 +64,7 @@ export default function CoursesPage () {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyUnit)
   const [formError, setFormError] = useState('')
+  const [unitDepartmentSearch, setUnitDepartmentSearch] = useState('')
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [programmeFilter, setProgrammeFilter] = useState('all')
@@ -166,8 +167,8 @@ export default function CoursesPage () {
           queryClient.invalidateQueries({ queryKey: [queryKey] })
         )
       )
-      setShowForm(false)
       setForm(emptyUnit)
+      setUnitDepartmentSearch('')
       setFormError('')
     },
     onError: err => {
@@ -271,31 +272,51 @@ export default function CoursesPage () {
             <div className='form-grid'>
               <fieldset className='selection-container'>
                 <legend>Departments</legend>
+                <input
+                  type='search'
+                  value={unitDepartmentSearch}
+                  onChange={event =>
+                    setUnitDepartmentSearch(event.target.value)
+                  }
+                  placeholder='Search departments'
+                  aria-label='Search departments for unit'
+                />
                 <span className='checkbox-list'>
-                  {(departments || []).map(department => (
-                    <label
-                      key={department.id ?? department.code}
-                      className='checkbox-option'
-                    >
-                      <input
-                        type='checkbox'
-                        checked={form.department_ids.includes(
-                          String(department.id ?? department.code)
-                        )}
-                        onChange={event =>
-                          setForm(current =>
-                            toggleDepartment(
-                              current,
-                              department.id ?? department.code,
-                              event.target.checked,
-                              programmes
+                  {(departments || [])
+                    .filter(department =>
+                      `${department.name || ''} ${department.code || ''}`
+                        .toLowerCase()
+                        .includes(unitDepartmentSearch.trim().toLowerCase())
+                    )
+                    .map(department => (
+                      <label
+                        key={department.id ?? department.code}
+                        className='checkbox-option'
+                      >
+                        <input
+                          type='checkbox'
+                          checked={form.department_ids.includes(
+                            String(department.id ?? department.code)
+                          )}
+                          onChange={event =>
+                            setForm(current =>
+                              toggleDepartment(
+                                current,
+                                department.id ?? department.code,
+                                event.target.checked,
+                                programmes
+                              )
                             )
-                          )
-                        }
-                      />
-                      <span>{department.name || department.code}</span>
-                    </label>
-                  ))}
+                          }
+                        />
+                        <span>{department.name || department.code}</span>
+                      </label>
+                    ))}
+                  {!(departments || []).some(department =>
+                    `${department.name || ''} ${department.code || ''}`
+                      .toLowerCase()
+                      .includes(unitDepartmentSearch.trim().toLowerCase())
+                  ) && <small>No departments match your search.</small>}
                 </span>
               </fieldset>
               <fieldset className='selection-container'>

@@ -139,6 +139,7 @@ export default function ReportsPage () {
               'student',
               'lecturer',
               'venue',
+              'exam',
               'user',
               'schedule_override'
             ].map(type => (

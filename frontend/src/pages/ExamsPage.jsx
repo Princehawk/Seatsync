@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { formatDateOnly, weekdayFromDateOnly } from '../utils/dateOnly'
 import ScrollableSelect from '../components/ScrollableSelect'
 import PaginationControls from '../components/PaginationControls'
+import ConfirmActionModal from '../components/ConfirmActionModal'
 import { useAuth } from '../context/AuthContext'
 import usePendingScheduleDrafts from '../hooks/usePendingScheduleDrafts'
 
@@ -47,6 +48,7 @@ const emptyExam = {
 }
 
 export default function ExamsPage () {
+  const queryClient = useQueryClient()
   const { user } = useAuth()
   const pendingSchedule = usePendingScheduleDrafts()
   const canManageExams = (user?.roles || []).includes('ADMIN')
@@ -64,10 +66,11 @@ export default function ExamsPage () {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [examToDelete, setExamToDelete] = useState(null)
 
   useEffect(() => {
     if (!formError) return undefined
-    const timeout = setTimeout(() => setFormError(''), 5000)
+    const timeout = setTimeout(() => setFormError(''), 10000)
     return () => clearTimeout(timeout)
   }, [formError])
 
@@ -286,6 +289,19 @@ export default function ExamsPage () {
       setFormError('')
     },
     onError: error => setFormError(error.message || 'Unable to update draft.')
+  })
+
+  const deleteExamMutation = useMutation({
+    mutationFn: id => api.del(`/api/exams/${id}`),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['exams'] }),
+        queryClient.invalidateQueries({ queryKey: ['timetable-exams'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['audit-logs'] })
+      ])
+      setExamToDelete(null)
+    }
   })
 
   const editExam = (exam, pendingDraftId = null, pendingDraftKind = 'exam') => {
@@ -740,6 +756,23 @@ export default function ExamsPage () {
       academic_year_id: Number(form.academic_year_id),
       semester_id: Number(form.semester_id),
       course_id: Number(form.course_id),
+      unit_name:
+        courses.find(item => String(item.id) === String(form.course_id))
+          ?.name || `Unit ${form.course_id}`,
+      cohort_names: cohortAllocations.map(allocation => ({
+        id: Number(allocation.cohortId),
+        name: allocation.cohortName
+      })),
+      venue_names: venueAllocations.map(allocation => {
+        const venue = venues.find(
+          item => String(item.id) === String(allocation.venueId)
+        )
+        return {
+          id: Number(allocation.venueId),
+          name:
+            venue?.name || venue?.venue_name || `Venue ${allocation.venueId}`
+        }
+      }),
       exam_date: form.exam_date,
       start_time: form.start_time,
       end_time: form.end_time,
@@ -876,7 +909,7 @@ export default function ExamsPage () {
           </div>
           {pendingSchedule.publishError && (
             <div className='schedule-conflict-alert' role='alert'>
-              <strong>Unable to publish these exams</strong>
+              <strong>Schedule conflict</strong>
               <span>{pendingSchedule.publishError}</span>
             </div>
           )}
@@ -1342,7 +1375,7 @@ export default function ExamsPage () {
 
             {formError && (
               <div className='schedule-conflict-alert' role='alert'>
-                <strong>Exam was not staged</strong>
+                <strong>Schedule conflict</strong>
                 <span>{formError}</span>
               </div>
             )}
@@ -1485,6 +1518,16 @@ export default function ExamsPage () {
                           >
                             Edit exam
                           </button>
+                          <button
+                            type='button'
+                            className='table-action danger'
+                            onClick={() => {
+                              deleteExamMutation.reset()
+                              setExamToDelete(item)
+                            }}
+                          >
+                            Delete
+                          </button>
                         </td>
                       )}
                     </tr>
@@ -1576,6 +1619,23 @@ export default function ExamsPage () {
             </div>
           </section>
         </div>
+      )}
+      {examToDelete && (
+        <ConfirmActionModal
+          title='Delete exam?'
+          eyebrow='This will be recorded in Reports'
+          message={`Delete ${
+            examToDelete.unitCode || examToDelete.unit_code || 'this exam'
+          } on ${formatExamDate(
+            examToDelete.exam_date
+          )}? Its cohort and venue allocations will also be removed.`}
+          errorMessage={deleteExamMutation.error?.message || ''}
+          isPending={deleteExamMutation.isPending}
+          onConfirm={() => deleteExamMutation.mutate(examToDelete.id)}
+          onCancel={() => {
+            if (!deleteExamMutation.isPending) setExamToDelete(null)
+          }}
+        />
       )}
     </div>
   )

@@ -49,6 +49,9 @@ function ProtectedLayout () {
     }
 
     socket.on('timetable:changed', refreshScheduleData)
+    socket.on('audit:changed', () => {
+      queryClient.invalidateQueries({ queryKey: ['audit-logs'] })
+    })
     return () => socket.disconnect()
   }, [queryClient])
 

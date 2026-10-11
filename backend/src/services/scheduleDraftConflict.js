@@ -74,12 +74,36 @@ const toSchedule = draft => {
 
 const shared = (left, right) => left.find(id => right.includes(id))
 
+const resourceName = (payload, type, id) => {
+  const singular = payload?.[`${type}_name`] ?? payload?.[`${type}Name`]
+  if (
+    singular &&
+    Number(payload?.[`${type}_id`] ?? payload?.[`${type}Id`]) === id
+  ) {
+    return singular
+  }
+  const labels = payload?.[`${type}_names`] ?? payload?.[`${type}Names`]
+  if (Array.isArray(labels)) {
+    const match = labels.find(
+      item => Number(item.id ?? item[`${type}_id`]) === id
+    )
+    if (match) return match.name || match.label || match.code
+  }
+  if (type === 'unit') return singular || `unit ${id}`
+  return `${type} ${id}`
+}
+
 export const assertNoStagedDraftConflict = (candidate, otherDrafts = []) => {
   const next = toSchedule(candidate)
   for (const otherDraft of otherDrafts) {
     if (!otherDraft || otherDraft.id === candidate.id) continue
     const other = toSchedule(otherDraft)
-    if (next.targetId && other.targetId && next.targetId === other.targetId) {
+    if (
+      next.isExam === other.isExam &&
+      next.targetId &&
+      other.targetId &&
+      next.targetId === other.targetId
+    ) {
       throw new Error(
         `Event/exam ${next.targetId} already has another pending edit (draft ${other.id}). Publish or remove that draft first.`
       )
@@ -89,20 +113,23 @@ export const assertNoStagedDraftConflict = (candidate, otherDrafts = []) => {
     if (next.isExam && other.isExam) {
       if (next.date !== other.date || !overlaps(next, other)) continue
       if (next.courseId && next.courseId === other.courseId) {
+        const unitName = resourceName(candidate.payload, 'unit', next.courseId)
         throw new Error(
-          `Staged exam conflict: unit ${next.courseId} has overlapping exams on ${next.date}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
+          `Staged exam conflict: ${unitName} has overlapping exams on ${next.date}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
         )
       }
       const cohortId = shared(next.cohorts, other.cohorts)
       if (cohortId) {
+        const cohortName = resourceName(candidate.payload, 'cohort', cohortId)
         throw new Error(
-          `Staged exam conflict: cohort ${cohortId} has overlapping exams on ${next.date}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
+          `Staged exam conflict: ${cohortName} has overlapping exams on ${next.date}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
         )
       }
       const venueId = shared(next.venues, other.venues)
       if (venueId) {
+        const venueName = resourceName(candidate.payload, 'venue', venueId)
         throw new Error(
-          `Staged exam conflict: venue ${venueId} is allocated to overlapping exams on ${next.date}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
+          `Staged exam conflict: ${venueName} is allocated to overlapping exams on ${next.date}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
         )
       }
       continue
@@ -112,8 +139,9 @@ export const assertNoStagedDraftConflict = (candidate, otherDrafts = []) => {
       if (next.day !== other.day || !overlaps(next, other)) continue
       const venueId = shared(next.venues, other.venues)
       if (venueId) {
+        const venueName = resourceName(candidate.payload, 'venue', venueId)
         throw new Error(
-          `Staged event conflict: venue ${venueId} is booked on ${next.day}, ${next.start}–${next.end}, overlapping draft ${other.id} (${other.start}–${other.end}).`
+          `Staged event conflict: ${venueName} is booked on ${next.day}, ${next.start}–${next.end}, overlapping draft ${other.id} (${other.start}–${other.end}).`
         )
       }
       if (next.lecturerId && next.lecturerId === other.lecturerId) {
@@ -123,27 +151,15 @@ export const assertNoStagedDraftConflict = (candidate, otherDrafts = []) => {
       }
       const cohortId = shared(next.cohorts, other.cohorts)
       if (cohortId) {
+        const cohortName = resourceName(candidate.payload, 'cohort', cohortId)
         throw new Error(
-          `Staged event conflict: cohort ${cohortId} has overlapping events on ${next.day}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
+          `Staged event conflict: ${cohortName} has overlapping events on ${next.day}, ${next.start}–${next.end} and ${other.start}–${other.end} (draft ${other.id}).`
         )
       }
       continue
     }
 
-    const event = next.isExam ? other : next
-    const exam = next.isExam ? next : other
-    if (event.day !== exam.day || !overlaps(event, exam)) continue
-    const cohortId = shared(event.cohorts, exam.cohorts)
-    if (cohortId) {
-      throw new Error(
-        `Staged exam/event conflict: cohort ${cohortId} has an exam and timetable event overlapping on ${exam.date}, ${exam.start}–${exam.end} (draft ${other.id}).`
-      )
-    }
-    const venueId = shared(event.venues, exam.venues)
-    if (venueId) {
-      throw new Error(
-        `Staged exam/event conflict: venue ${venueId} is allocated to overlapping exam and timetable event on ${exam.date}, ${exam.start}–${exam.end} (draft ${other.id}).`
-      )
-    }
+    // Exams and recurring timetable events are separate scheduling entities;
+    // only compare drafts within the same kind.
   }
 }

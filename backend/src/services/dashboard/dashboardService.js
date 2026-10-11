@@ -48,11 +48,12 @@ const getLecturerDashboard = async user => {
   }
 
   const events = await query(
-    `SELECT te.*, u.code AS unit_code, u.name AS unit_name, v.name AS venue_name,
+    `SELECT te.*, te.unit_id AS course_id,
+       u.code AS unit_code, u.name AS unit_name, v.name AS venue_name,
        v.code AS venue_code, v.capacity AS venue_capacity,
        GROUP_CONCAT(DISTINCT tec.cohort_id) AS cohort_ids
      FROM timetable_entries te
-     JOIN units u ON u.id = te.course_id
+    JOIN units u ON u.id = te.unit_id
      JOIN venues v ON v.id = te.venue_id
      LEFT JOIN timetable_entry_cohorts tec ON tec.timetable_entry_id = te.id
      WHERE te.lecturer_id = ? AND te.status = 'SCHEDULED'
@@ -65,11 +66,11 @@ const getLecturerDashboard = async user => {
     await query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today")
   )[0]?.today
   const todaysOverrides = await query(
-    `SELECT so.*, te.course_id, te.lecturer_id, te.cohort_id,
+    `SELECT so.*, te.unit_id AS course_id, te.lecturer_id, te.cohort_id,
        u.code AS unit_code, u.name AS unit_name, v.name AS venue_name, v.code AS venue_code
      FROM schedule_overrides so
      JOIN timetable_entries te ON te.id = so.timetable_entry_id
-     JOIN units u ON u.id = te.course_id
+    JOIN units u ON u.id = te.unit_id
      JOIN venues v ON v.id = so.new_venue_id
      WHERE te.lecturer_id = ? AND so.effective_date = ? AND so.status = 'APPROVED'`,
     [lecturer.id, todayDate]
@@ -281,9 +282,10 @@ export const getDashboardSummary = async user => {
 
   const recentEntries = summarizeEntries(
     await query(
-      `SELECT te.*, c.name AS course_name, v.name AS venue_name
+      `SELECT te.*, te.unit_id AS course_id,
+       c.name AS course_name, v.name AS venue_name
        FROM timetable_entries te
-      LEFT JOIN units c ON c.id = te.course_id
+      LEFT JOIN units c ON c.id = te.unit_id
        LEFT JOIN venues v ON v.id = te.venue_id
        ORDER BY te.updated_at DESC
        LIMIT 6`
@@ -302,9 +304,10 @@ export const getDashboardSummary = async user => {
 
   const todayClasses = summarizeEntries(
     await query(
-      `SELECT te.*, c.name AS course_name, v.name AS venue_name
+      `SELECT te.*, te.unit_id AS course_id,
+       c.name AS course_name, v.name AS venue_name
        FROM timetable_entries te
-      LEFT JOIN units c ON c.id = te.course_id
+      LEFT JOIN units c ON c.id = te.unit_id
        LEFT JOIN venues v ON v.id = te.venue_id
        WHERE te.day_of_week = ?
        ORDER BY te.start_time ASC
@@ -315,9 +318,10 @@ export const getDashboardSummary = async user => {
 
   const upcomingClasses = summarizeEntries(
     await query(
-      `SELECT te.*, c.name AS course_name, v.name AS venue_name
+      `SELECT te.*, te.unit_id AS course_id,
+       c.name AS course_name, v.name AS venue_name
        FROM timetable_entries te
-      LEFT JOIN units c ON c.id = te.course_id
+      LEFT JOIN units c ON c.id = te.unit_id
        LEFT JOIN venues v ON v.id = te.venue_id
        WHERE te.day_of_week >= ?
        ORDER BY te.day_of_week, te.start_time ASC
@@ -333,9 +337,10 @@ export const getDashboardSummary = async user => {
   )[0]
 
   const examList = await query(
-    `SELECT e.*, c.name AS course_name, c.code AS course_code
+    `SELECT e.*, e.unit_id AS course_id,
+       c.name AS course_name, c.code AS course_code
      FROM exams e
-    LEFT JOIN units c ON c.id = e.course_id
+     LEFT JOIN units c ON c.id = e.unit_id
      WHERE e.exam_date >= CURDATE()
      ORDER BY e.exam_date ASC, e.start_time ASC
      LIMIT 6`

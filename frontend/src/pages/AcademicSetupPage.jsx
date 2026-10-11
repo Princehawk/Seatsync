@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
+import { io } from 'socket.io-client'
 import { api } from '../api/client'
 import AcademicRecordsTable from '../components/AcademicRecordsTable'
+import ConfirmActionModal from '../components/ConfirmActionModal'
+import SearchableSelect from '../components/SearchableSelect'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -53,12 +56,213 @@ export default function AcademicSetupPage () {
   const [unitSearch, setUnitSearch] = useState('')
   const [unitProgrammeFilter, setUnitProgrammeFilter] = useState('all')
   const [unitSort, setUnitSort] = useState('name')
+  const [editingRecord, setEditingRecord] = useState(null)
+  const [recordToDelete, setRecordToDelete] = useState(null)
+  const [unitToEdit, setUnitToEdit] = useState(null)
+  const builderSectionRef = useRef(null)
+  const unitEditorSectionRef = useRef(null)
+  const [unitForm, setUnitForm] = useState({
+    code: '',
+    name: '',
+    description: '',
+    department_ids: [],
+    programme_ids: [],
+    semester_id: '',
+    year_level: 1
+  })
+
+  const recordEndpoints = {
+    faculty: '/api/academic/faculties',
+    department: '/api/academic/departments',
+    programme: '/api/academic/programmes',
+    academicYear: '/api/academic/academic-years',
+    semester: '/api/academic/semesters',
+    cohort: '/api/academic/cohorts'
+  }
+
+  const invalidateAcademicData = async () =>
+    Promise.all(
+      [
+        'academic-faculties',
+        'academic-departments',
+        'academic-programmes',
+        'academic-years',
+        'academic-semesters',
+        'academic-cohorts',
+        'cohorts',
+        'academic-courses',
+        'courses',
+        'exam-course-options'
+      ].map(key => queryClient.invalidateQueries({ queryKey: [key] }))
+    )
+
+  const updateRecordMutation = useMutation({
+    mutationFn: ({ entity, id, payload }) =>
+      api.put(`${recordEndpoints[entity]}/${id}`, payload),
+    onSuccess: async (_, variables) => {
+      await invalidateAcademicData()
+      setEditingRecord(null)
+      setShowBuilder(false)
+      setForms(initialForms)
+      toast.success(`${variables.entity} updated.`)
+    },
+    onError: error => toast.error(error.message || 'Unable to update record.')
+  })
+
+  const deleteRecordMutation = useMutation({
+    mutationFn: ({ entity, id }) =>
+      api.del(
+        entity === 'unit'
+          ? `/api/academic/courses/${id}`
+          : `${recordEndpoints[entity]}/${id}`
+      ),
+    onSuccess: async (_, variables) => {
+      await invalidateAcademicData()
+      setRecordToDelete(null)
+      toast.success(`${variables.entity} deleted.`)
+    },
+    onError: error => toast.error(error.message || 'Unable to delete record.')
+  })
+
+  const updateUnitMutation = useMutation({
+    mutationFn: ({ id, payload }) =>
+      api.put(`/api/academic/courses/${id}`, payload),
+    onSuccess: async () => {
+      await invalidateAcademicData()
+      setUnitToEdit(null)
+      toast.success('Unit updated.')
+    },
+    onError: error => toast.error(error.message || 'Unable to update unit.')
+  })
+
+  const openRecordEditor = (entity, record) => {
+    const values = {
+      faculty: { name: record.name || '', code: record.code || '' },
+      department: {
+        name: record.name || '',
+        code: record.code || '',
+        faculty_id: String(record.faculty_id ?? record.facultyId ?? '')
+      },
+      programme: {
+        name: record.name || '',
+        code: record.code || '',
+        department_id: String(
+          record.department_id ?? record.departmentId ?? ''
+        ),
+        duration_years: record.duration_years ?? record.durationYears ?? 4
+      },
+      academicYear: {
+        name: record.name || '',
+        start_date: toInputDate(record.start_date ?? record.startDate),
+        end_date: toInputDate(record.end_date ?? record.endDate)
+      },
+      semester: {
+        name: record.name || '',
+        number: String(record.number ?? record.semester_number ?? ''),
+        academic_year_id: String(
+          record.academic_year_id ?? record.academicYearId ?? ''
+        ),
+        start_date: toInputDate(record.start_date ?? record.startDate),
+        end_date: toInputDate(record.end_date ?? record.endDate)
+      },
+      cohort: {
+        name: record.name || '',
+        programme_id: String(record.programme_id ?? record.programmeId ?? ''),
+        student_count: String(
+          record.student_count ?? record.studentCount ?? ''
+        ),
+        academic_year_id: String(
+          record.academic_year_id ?? record.academicYearId ?? ''
+        )
+      }
+    }
+    setEditingRecord({ entity, id: record.id })
+    setActiveSection(entity)
+    setForms(current => ({ ...current, [entity]: values[entity] }))
+    setShowBuilder(true)
+    setFormError('')
+  }
+
+  const openUnitEditor = unit => {
+    setUnitToEdit(unit)
+    setUnitForm({
+      code: unit.code || '',
+      name: unit.name || '',
+      description: unit.description || '',
+      department_ids: (unit.departmentIds || unit.department_ids || []).map(
+        String
+      ),
+      programme_ids: (unit.programmeIds || unit.programme_ids || []).map(
+        String
+      ),
+      semester_id: String(unit.semester_id ?? unit.semesterId ?? ''),
+      year_level: unit.year_level ?? unit.yearLevel ?? 1
+    })
+  }
 
   useEffect(() => {
     if (!formError) return undefined
     const timeout = setTimeout(() => setFormError(''), 5000)
     return () => clearTimeout(timeout)
   }, [formError])
+
+  useEffect(() => {
+    if (!showBuilder && !editingRecord && !unitToEdit) return undefined
+    const target = unitToEdit
+      ? unitEditorSectionRef.current
+      : builderSectionRef.current
+    const frame = requestAnimationFrame(() => {
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [showBuilder, editingRecord, unitToEdit])
+
+  useEffect(() => {
+    const socket = io(
+      import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000',
+      {
+        transports: ['websocket'],
+        withCredentials: true
+      }
+    )
+
+    socket.on('academic:updated', ({ entity, id }) => {
+      queryClient.invalidateQueries({ queryKey: ['academic-faculties'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-departments'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-programmes'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-years'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-semesters'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-courses'] })
+      queryClient.invalidateQueries({ queryKey: ['cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['courses'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-course-options'] })
+      if (String(entity) === 'unit' || String(entity) === 'academic_unit') {
+        toast.info('Academic records updated live.')
+      }
+      if (id) {
+        toast.info(`${entity || 'Academic'} record updated.`)
+      }
+    })
+
+    socket.on('academic:deleted', ({ entity, id }) => {
+      queryClient.invalidateQueries({ queryKey: ['academic-faculties'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-departments'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-programmes'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-years'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-semesters'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-courses'] })
+      queryClient.invalidateQueries({ queryKey: ['cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['courses'] })
+      queryClient.invalidateQueries({ queryKey: ['exam-course-options'] })
+      if (id) {
+        toast.info(`${entity || 'Academic'} record deleted.`)
+      }
+    })
+
+    return () => socket.disconnect()
+  }, [queryClient])
 
   const { data: faculties = [], isLoading: facultiesLoading } = useQuery({
     queryKey: ['academic-faculties'],
@@ -261,25 +465,14 @@ export default function AcademicSetupPage () {
       return api.post(config.endpoint, payload)
     },
     onSuccess: async (_, variables) => {
-      const queryKeys =
-        {
-          faculty: ['academic-faculties'],
-          department: ['academic-departments'],
-          programme: ['academic-programmes'],
-          academicYear: ['academic-years'],
-          semester: ['academic-semesters'],
-          cohort: ['academic-cohorts', 'cohorts']
-        }[variables.section] || []
-      await Promise.all(
-        queryKeys.map(queryKey =>
-          queryClient.invalidateQueries({ queryKey: [queryKey] })
-        )
-      )
+      await invalidateAcademicData()
       setForms(current => ({
         ...current,
         [variables.section]: initialForms[variables.section]
       }))
+      setEditingRecord(null)
       setFormError('')
+      toast.success(`${variables.section} created.`)
     },
     onError: err => toast.error(err.message || 'Unable to create record.')
   })
@@ -292,6 +485,91 @@ export default function AcademicSetupPage () {
         [field]: value
       }
     }))
+  }
+
+  const getDuplicateAcademicError = (section, payload, currentId = null) => {
+    const map = {
+      faculty: faculties,
+      department: departments,
+      programme: programmes,
+      academicYear: academicYears,
+      semester: semesters,
+      cohort: cohorts
+    }
+    const rows = map[section] || []
+    const compare = field =>
+      rows.some(item => {
+        if (currentId && Number(item.id) === Number(currentId)) return false
+        const value = String(
+          item[field] ?? item[field.replace(/_id$/, 'Id')] ?? ''
+        )
+          .trim()
+          .toLowerCase()
+        return (
+          value &&
+          value ===
+            String(payload[field] ?? '')
+              .trim()
+              .toLowerCase()
+        )
+      })
+    if (section === 'faculty' && (compare('name') || compare('code'))) {
+      return 'A faculty with that name or code already exists.'
+    }
+    if (section === 'department' && (compare('name') || compare('code'))) {
+      return 'A department with that name or code already exists.'
+    }
+    if (section === 'programme' && (compare('name') || compare('code'))) {
+      return 'A programme with that name or code already exists.'
+    }
+    if (section === 'academicYear' && compare('name')) {
+      return 'An academic year with that name already exists.'
+    }
+    if (section === 'semester') {
+      const sameYear = Number(payload.academic_year_id || 0)
+      const duplicate = semesters.some(item => {
+        if (currentId && Number(item.id) === Number(currentId)) return false
+        const sameAcademicYear =
+          Number(item.academic_year_id ?? item.academicYearId ?? 0) === sameYear
+        const sameName =
+          String(item.name ?? '')
+            .trim()
+            .toLowerCase() ===
+          String(payload.name ?? '')
+            .trim()
+            .toLowerCase()
+        const sameNumber =
+          Number(
+            item.number ?? item.semester_number ?? item.semesterNumber ?? 0
+          ) === Number(payload.number || 0)
+        return sameAcademicYear && (sameName || sameNumber)
+      })
+      if (duplicate) {
+        return 'A semester with that academic year, name, or number already exists.'
+      }
+    }
+    if (section === 'cohort') {
+      const sameProgramme = Number(payload.programme_id || 0)
+      const duplicate = cohorts.some(item => {
+        if (currentId && Number(item.id) === Number(currentId)) return false
+        const itemProgramme = Number(item.programme_id ?? item.programmeId ?? 0)
+        const sameAcademicYear =
+          Number(item.academic_year_id ?? item.academicYearId ?? 0) ===
+          Number(payload.academic_year_id || 0)
+        const sameName =
+          String(item.name ?? '')
+            .trim()
+            .toLowerCase() ===
+          String(payload.name ?? '')
+            .trim()
+            .toLowerCase()
+        return itemProgramme === sameProgramme && sameAcademicYear && sameName
+      })
+      if (duplicate) {
+        return 'A cohort with that programme, academic year, and name already exists.'
+      }
+    }
+    return ''
   }
 
   const handleSubmit = event => {
@@ -355,7 +633,26 @@ export default function AcademicSetupPage () {
       return
     }
 
-    createMutation.mutate({ section, payload })
+    const duplicateError = getDuplicateAcademicError(
+      section,
+      payload,
+      editingRecord?.id
+    )
+    if (duplicateError) {
+      setFormError(duplicateError)
+      toast.error(duplicateError)
+      return
+    }
+
+    if (editingRecord) {
+      updateRecordMutation.mutate({
+        entity: section,
+        id: editingRecord.id,
+        payload
+      })
+    } else {
+      createMutation.mutate({ section, payload })
+    }
   }
 
   return (
@@ -384,7 +681,10 @@ export default function AcademicSetupPage () {
       </div>
 
       {showBuilder && (
-        <section className='content-panel academic-builder-panel'>
+        <section
+          ref={builderSectionRef}
+          className='content-panel academic-builder-panel'
+        >
           <div className='toolbar-actions academic-section-switcher'>
             {sectionConfig.map(section => (
               <button
@@ -520,26 +820,19 @@ export default function AcademicSetupPage () {
                   </label>
                   <label>
                     Department
-                    <select
+                    <SearchableSelect
+                      options={departments.map(department => ({
+                        value: department.id ?? department.code,
+                        label: department.name || department.code
+                      }))}
                       value={forms.programme.department_id}
-                      onChange={event =>
-                        handleFieldChange(
-                          'programme',
-                          'department_id',
-                          event.target.value
-                        )
+                      onChange={value =>
+                        handleFieldChange('programme', 'department_id', value)
                       }
-                    >
-                      <option value=''>Select department</option>
-                      {departments.map(department => (
-                        <option
-                          key={department.id ?? department.code}
-                          value={department.id ?? department.code}
-                        >
-                          {department.name || department.code}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder='Select department'
+                      searchPlaceholder='Search departments'
+                      ariaLabel='Search programme departments'
+                    />
                   </label>
                   <label>
                     Duration (years)
@@ -741,26 +1034,19 @@ export default function AcademicSetupPage () {
                   </label>
                   <label>
                     Programme
-                    <select
+                    <SearchableSelect
+                      options={programmes.map(programme => ({
+                        value: programme.id ?? programme.code,
+                        label: programme.name || programme.code
+                      }))}
                       value={forms.cohort.programme_id}
-                      onChange={event =>
-                        handleFieldChange(
-                          'cohort',
-                          'programme_id',
-                          event.target.value
-                        )
+                      onChange={value =>
+                        handleFieldChange('cohort', 'programme_id', value)
                       }
-                    >
-                      <option value=''>Select programme</option>
-                      {programmes.map(programme => (
-                        <option
-                          key={programme.id ?? programme.code}
-                          value={programme.id ?? programme.code}
-                        >
-                          {programme.name || programme.code}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder='Select programme'
+                      searchPlaceholder='Search programmes'
+                      ariaLabel='Search cohort programmes'
+                    />
                   </label>
                   <label>
                     Academic year
@@ -825,6 +1111,185 @@ export default function AcademicSetupPage () {
         </section>
       )}
 
+      {unitToEdit && (
+        <section
+          ref={unitEditorSectionRef}
+          className='content-panel academic-builder-panel'
+        >
+          <div className='page-header compact-table-header'>
+            <h2>Edit unit</h2>
+          </div>
+          <form
+            className='stack-form academic-builder-form'
+            onSubmit={event => {
+              event.preventDefault()
+              const payload = {
+                code: unitForm.code,
+                name: unitForm.name,
+                description: unitForm.description,
+                department_ids: unitForm.department_ids
+                  .map(Number)
+                  .filter(Boolean),
+                programme_ids: unitForm.programme_ids
+                  .map(Number)
+                  .filter(Boolean),
+                semester_id: Number(unitForm.semester_id) || null,
+                year_level: Number(unitForm.year_level) || 1
+              }
+              if (!payload.code || !payload.name || !payload.semester_id) {
+                toast.error('Unit code, name, and semester are required.')
+                return
+              }
+              const duplicate = courses.some(item => {
+                if (Number(item.id) === Number(unitToEdit.id)) return false
+                return (
+                  String(item.code ?? '')
+                    .trim()
+                    .toLowerCase() === payload.code.trim().toLowerCase() ||
+                  String(item.name ?? '')
+                    .trim()
+                    .toLowerCase() === payload.name.trim().toLowerCase()
+                )
+              })
+              if (duplicate) {
+                toast.error('A unit with that name or code already exists.')
+                return
+              }
+              updateUnitMutation.mutate({ id: unitToEdit.id, payload })
+            }}
+          >
+            <div className='form-grid'>
+              <label>
+                Unit code
+                <input
+                  value={unitForm.code}
+                  onChange={event =>
+                    setUnitForm(current => ({
+                      ...current,
+                      code: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Unit name
+                <input
+                  value={unitForm.name}
+                  onChange={event =>
+                    setUnitForm(current => ({
+                      ...current,
+                      name: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Semester
+                <select
+                  value={unitForm.semester_id}
+                  onChange={event =>
+                    setUnitForm(current => ({
+                      ...current,
+                      semester_id: event.target.value
+                    }))
+                  }
+                >
+                  <option value=''>Select semester</option>
+                  {semesters.map(semester => (
+                    <option key={semester.id} value={semester.id}>
+                      {semester.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Year level
+                <input
+                  type='number'
+                  value={unitForm.year_level}
+                  onChange={event =>
+                    setUnitForm(current => ({
+                      ...current,
+                      year_level: event.target.value
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Programmes
+                <SearchableSelect
+                  options={[
+                    { value: 'all', label: 'All programmes' },
+                    ...programmes.map(programme => ({
+                      value: programme.id,
+                      label: programme.name || programme.code
+                    }))
+                  ]}
+                  value={unitForm.programme_ids}
+                  onChange={value =>
+                    setUnitForm(current => ({
+                      ...current,
+                      programme_ids: value
+                    }))
+                  }
+                  placeholder='Select programmes'
+                  searchPlaceholder='Search programmes'
+                  ariaLabel='Search unit programmes'
+                  multiple
+                />
+              </label>
+              <label>
+                Departments
+                <select
+                  multiple
+                  value={unitForm.department_ids}
+                  onChange={event =>
+                    setUnitForm(current => ({
+                      ...current,
+                      department_ids: Array.from(
+                        event.target.selectedOptions,
+                        option => option.value
+                      )
+                    }))
+                  }
+                >
+                  {departments.map(department => (
+                    <option key={department.id} value={String(department.id)}>
+                      {department.name || department.code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Description
+                <textarea
+                  value={unitForm.description}
+                  onChange={event =>
+                    setUnitForm(current => ({
+                      ...current,
+                      description: event.target.value
+                    }))
+                  }
+                  rows='3'
+                />
+              </label>
+            </div>
+            <div className='toolbar-actions'>
+              <button type='submit' className='primary-button'>
+                Save unit
+              </button>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setUnitToEdit(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
       {isLoading ? (
         <div className='content-panel'>
           <p>Loading academic setup...</p>
@@ -858,6 +1323,10 @@ export default function AcademicSetupPage () {
                     .filter(item => item.value)
                 }
               ]}
+              onEdit={record => openRecordEditor('faculty', record)}
+              onDelete={record =>
+                setRecordToDelete({ entity: 'faculty', record })
+              }
             />
             <AcademicRecordsTable
               title='Departments'
@@ -887,6 +1356,10 @@ export default function AcademicSetupPage () {
                   }))
                 }
               ]}
+              onEdit={record => openRecordEditor('department', record)}
+              onDelete={record =>
+                setRecordToDelete({ entity: 'department', record })
+              }
             />
             <AcademicRecordsTable
               title='Programmes'
@@ -915,6 +1388,7 @@ export default function AcademicSetupPage () {
                 {
                   key: 'department',
                   label: 'departments',
+                  searchable: true,
                   value: item => item.department_id ?? item.departmentId ?? '',
                   options: departments.map(item => ({
                     value: item.id,
@@ -922,6 +1396,10 @@ export default function AcademicSetupPage () {
                   }))
                 }
               ]}
+              onEdit={record => openRecordEditor('programme', record)}
+              onDelete={record =>
+                setRecordToDelete({ entity: 'programme', record })
+              }
             />
             <AcademicRecordsTable
               title='Academic years'
@@ -957,6 +1435,10 @@ export default function AcademicSetupPage () {
                   ]
                 }
               ]}
+              onEdit={record => openRecordEditor('academicYear', record)}
+              onDelete={record =>
+                setRecordToDelete({ entity: 'academicYear', record })
+              }
             />
             <AcademicRecordsTable
               title='Semesters'
@@ -1000,6 +1482,10 @@ export default function AcademicSetupPage () {
                   }))
                 }
               ]}
+              onEdit={record => openRecordEditor('semester', record)}
+              onDelete={record =>
+                setRecordToDelete({ entity: 'semester', record })
+              }
             />
             <AcademicRecordsTable
               title='Cohorts'
@@ -1036,6 +1522,7 @@ export default function AcademicSetupPage () {
                 {
                   key: 'programme',
                   label: 'programmes',
+                  searchable: true,
                   value: item => item.programme_id ?? item.programmeId ?? '',
                   options: programmes.map(item => ({
                     value: item.id,
@@ -1043,6 +1530,10 @@ export default function AcademicSetupPage () {
                   }))
                 }
               ]}
+              onEdit={record => openRecordEditor('cohort', record)}
+              onDelete={record =>
+                setRecordToDelete({ entity: 'cohort', record })
+              }
             />
           </div>
 
@@ -1055,17 +1546,17 @@ export default function AcademicSetupPage () {
                   onChange={event => setUnitSearch(event.target.value)}
                   placeholder='Search units'
                 />
-                <select
+                <SearchableSelect
+                  options={programmes.map(programme => ({
+                    value: programme.id,
+                    label: programme.name || programme.code
+                  }))}
                   value={unitProgrammeFilter}
-                  onChange={event => setUnitProgrammeFilter(event.target.value)}
-                >
-                  <option value='all'>All programmes</option>
-                  {programmes.map(programme => (
-                    <option key={programme.id} value={programme.id}>
-                      {programme.name || programme.code}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setUnitProgrammeFilter}
+                  placeholder='All programmes'
+                  searchPlaceholder='Search programmes'
+                  ariaLabel='Search programme unit filters'
+                />
                 <select
                   value={unitSort}
                   onChange={event => setUnitSort(event.target.value)}
@@ -1085,6 +1576,7 @@ export default function AcademicSetupPage () {
                     <th>Programme</th>
                     <th>Year</th>
                     <th>Semester</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1102,11 +1594,32 @@ export default function AcademicSetupPage () {
                               String(unit.semester_id ?? unit.semesterId)
                           )?.name || 'Unassigned'}
                         </td>
+                        <td className='academic-record-actions'>
+                          <button
+                            type='button'
+                            className='table-action'
+                            onClick={() => openUnitEditor(unit)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type='button'
+                            className='table-action danger'
+                            onClick={() =>
+                              setRecordToDelete({
+                                entity: 'unit',
+                                record: unit
+                              })
+                            }
+                          >
+                            Delete
+                          </button>
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan='5'>No units match the selected filters.</td>
+                      <td colSpan='6'>No units match the selected filters.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1114,6 +1627,30 @@ export default function AcademicSetupPage () {
             </div>
           </section>
         </>
+      )}
+
+      {recordToDelete && (
+        <ConfirmActionModal
+          title={`Delete ${
+            recordToDelete.entity === 'academicYear'
+              ? 'Academic year'
+              : recordToDelete.entity
+          }`}
+          message={`This will permanently remove ${
+            recordToDelete.record.name ||
+            recordToDelete.record.code ||
+            'this record'
+          }. This action is audited.`}
+          confirmLabel='Delete record'
+          onConfirm={() => {
+            deleteRecordMutation.mutate({
+              entity: recordToDelete.entity,
+              id: recordToDelete.record.id
+            })
+          }}
+          onCancel={() => setRecordToDelete(null)}
+          isPending={deleteRecordMutation.isPending}
+        />
       )}
     </div>
   )

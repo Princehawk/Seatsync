@@ -15,6 +15,8 @@
     "migrate:timetable-assignments": "node src/database/timetableAssignmentMigration.js",
     "migrate:registration-profiles": "node src/database/registrationProfilesMigration.js",
     "migrate:lecturer-units": "node src/database/lecturerUnitsMigration.js",
+    "migrate:schedule-drafts": "node src/database/scheduleDraftsMigration.js",
+    "migrate:unit-id-columns": "node src/database/renameCourseIdToUnitIdMigration.js",
     "migrate:exam-type": "node src/database/removeExamType.js",
     "test": "node --test"
   },

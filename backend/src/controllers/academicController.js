@@ -1,3 +1,4 @@
+import { emitSocketEvent } from '../socket/socketEvents.js'
 import {
   listFaculties,
   listDepartments,
@@ -33,7 +34,10 @@ import {
   getCourse,
   updateCourse,
   deleteVenue,
-  getVenue
+  getVenue,
+  updateAcademicRecord,
+  deleteAcademicRecord,
+  getAcademicDeleteBlockers
 } from '../services/academicStructureService.js'
 import { createAuditLog } from '../services/security/securityService.js'
 import {
@@ -54,7 +58,11 @@ export const getFaculties = async (req, res) => {
 }
 
 export const addFaculty = async (req, res) => {
-  res.status(201).json({ data: await createFaculty(req.body) })
+  try {
+    res.status(201).json({ data: await createFaculty(req.body) })
+  } catch (error) {
+    res.status(409).json({ message: error.message })
+  }
 }
 
 export const getDepartments = async (req, res) => {
@@ -62,7 +70,11 @@ export const getDepartments = async (req, res) => {
 }
 
 export const addDepartment = async (req, res) => {
-  res.status(201).json({ data: await createDepartment(req.body) })
+  try {
+    res.status(201).json({ data: await createDepartment(req.body) })
+  } catch (error) {
+    res.status(409).json({ message: error.message })
+  }
 }
 
 export const getProgrammes = async (req, res) => {
@@ -70,7 +82,11 @@ export const getProgrammes = async (req, res) => {
 }
 
 export const addProgramme = async (req, res) => {
-  res.status(201).json({ data: await createProgramme(req.body) })
+  try {
+    res.status(201).json({ data: await createProgramme(req.body) })
+  } catch (error) {
+    res.status(409).json({ message: error.message })
+  }
 }
 
 export const getAcademicYears = async (req, res) => {
@@ -78,7 +94,11 @@ export const getAcademicYears = async (req, res) => {
 }
 
 export const addAcademicYear = async (req, res) => {
-  res.status(201).json({ data: await createAcademicYear(req.body) })
+  try {
+    res.status(201).json({ data: await createAcademicYear(req.body) })
+  } catch (error) {
+    res.status(409).json({ message: error.message })
+  }
 }
 
 export const getSemesters = async (req, res) => {
@@ -86,7 +106,11 @@ export const getSemesters = async (req, res) => {
 }
 
 export const addSemester = async (req, res) => {
-  res.status(201).json({ data: await createSemester(req.body) })
+  try {
+    res.status(201).json({ data: await createSemester(req.body) })
+  } catch (error) {
+    res.status(409).json({ message: error.message })
+  }
 }
 
 export const getCohorts = async (req, res) => {
@@ -96,7 +120,95 @@ export const getCohorts = async (req, res) => {
 }
 
 export const addCohort = async (req, res) => {
-  res.status(201).json({ data: await createCohort(req.body) })
+  try {
+    res.status(201).json({ data: await createCohort(req.body) })
+  } catch (error) {
+    res.status(409).json({ message: error.message })
+  }
+}
+
+export const editAcademicRecord = entity => async (req, res) => {
+  const getters = {
+    faculty: listFaculties,
+    department: listDepartments,
+    programme: listProgrammes,
+    academicYear: listAcademicYears,
+    semester: listSemesters,
+    cohort: async () => {
+      const rows = await listCohorts()
+      return Array.isArray(rows) ? rows : rows.data
+    }
+  }
+  try {
+    const oldValues = (await getters[entity]()).find(
+      item => Number(item.id) === Number(req.params.id)
+    )
+    if (!oldValues)
+      return res.status(404).json({ message: `${entity} not found.` })
+    const data = await updateAcademicRecord(entity, req.params.id, req.body)
+    await auditRequest(req, {
+      action: 'UPDATE',
+      entityType: entity === 'academicYear' ? 'academic_year' : entity,
+      entityId: req.params.id,
+      oldValues,
+      newValues: data
+    })
+    emitSocketEvent('academic:updated', {
+      entity: entity === 'academicYear' ? 'academic_year' : entity,
+      id: req.params.id,
+      record: data
+    })
+    return res.json({ data })
+  } catch (error) {
+    return res.status(409).json({ message: error.message })
+  }
+}
+
+export const removeAcademicRecord = entity => async (req, res) => {
+  const getters = {
+    faculty: listFaculties,
+    department: listDepartments,
+    programme: listProgrammes,
+    academicYear: listAcademicYears,
+    semester: listSemesters,
+    cohort: async () => {
+      const rows = await listCohorts()
+      return Array.isArray(rows) ? rows : rows.data
+    }
+  }
+  try {
+    const oldValues = (await getters[entity]()).find(
+      item => Number(item.id) === Number(req.params.id)
+    )
+    if (!oldValues)
+      return res.status(404).json({ message: `${entity} not found.` })
+    const blockers = await getAcademicDeleteBlockers(entity, req.params.id)
+    if (Object.keys(blockers).length) {
+      const references = Object.entries(blockers)
+        .map(([table, count]) => `${count} ${table.replaceAll('_', ' ')}`)
+        .join(', ')
+      return res.status(409).json({
+        message: `Cannot delete ${entity}: referenced by ${references}. Remove or reassign those records first.`
+      })
+    }
+    const deleted = await deleteAcademicRecord(entity, req.params.id)
+    if (deleted) {
+      await auditRequest(req, {
+        action: 'DELETE',
+        entityType: entity === 'academicYear' ? 'academic_year' : entity,
+        entityId: req.params.id,
+        oldValues
+      })
+      emitSocketEvent('academic:deleted', {
+        entity: entity === 'academicYear' ? 'academic_year' : entity,
+        id: req.params.id,
+        record: oldValues
+      })
+    }
+    return res.json({ success: Boolean(deleted) })
+  } catch (error) {
+    return res.status(409).json({ message: error.message })
+  }
 }
 
 export const editCohort = async (req, res) => {
@@ -109,6 +221,11 @@ export const editCohort = async (req, res) => {
     entityId: req.params.id,
     oldValues,
     newValues: data
+  })
+  emitSocketEvent('academic:updated', {
+    entity: 'cohort',
+    id: req.params.id,
+    record: data
   })
   return res.json({ data })
 }
@@ -168,6 +285,11 @@ export const removeCohort = async (req, res) => {
       entityType: 'cohort',
       entityId: req.params.id,
       oldValues
+    })
+    emitSocketEvent('academic:deleted', {
+      entity: 'cohort',
+      id: req.params.id,
+      record: oldValues
     })
   }
   res.json({ success: deleted })
@@ -240,11 +362,9 @@ export const editLecturerAcademicDetails = async (req, res) => {
     })
     return res.json({ data })
   } catch (error) {
-    return res
-      .status(400)
-      .json({
-        message: error.message || 'Unable to update lecturer academic details.'
-      })
+    return res.status(400).json({
+      message: error.message || 'Unable to update lecturer academic details.'
+    })
   }
 }
 
@@ -255,39 +375,67 @@ export const getCourses = async (req, res) => {
 }
 
 export const addCourse = async (req, res) => {
-  const data = await createCourse(req.body)
-  if (data?.validationError) {
-    return res.status(400).json({ message: data.validationError })
+  try {
+    const data = await createCourse(req.body)
+    if (data?.validationError) {
+      return res.status(400).json({ message: data.validationError })
+    }
+    return res.status(201).json({ data })
+  } catch (error) {
+    return res.status(409).json({ message: error.message })
   }
-  return res.status(201).json({ data })
 }
 
 export const editCourse = async (req, res) => {
   const oldValues = await getCourse(req.params.id)
   if (!oldValues) return res.status(404).json({ message: 'Unit not found.' })
-  const data = await updateCourse(req.params.id, req.body)
-  if (data?.validationError) {
-    return res.status(400).json({ message: data.validationError })
+  try {
+    const data = await updateCourse(req.params.id, req.body)
+    if (data?.validationError) {
+      return res.status(400).json({ message: data.validationError })
+    }
+    await auditRequest(req, {
+      action: 'UPDATE',
+      entityType: 'unit',
+      entityId: req.params.id,
+      oldValues,
+      newValues: data
+    })
+    emitSocketEvent('academic:updated', {
+      entity: 'unit',
+      id: req.params.id,
+      record: data
+    })
+    return res.json({ data })
+  } catch (error) {
+    return res.status(409).json({ message: error.message })
   }
-  await auditRequest(req, {
-    action: 'UPDATE',
-    entityType: 'unit',
-    entityId: req.params.id,
-    oldValues,
-    newValues: data
-  })
-  return res.json({ data })
 }
 
 export const removeCourse = async (req, res) => {
   const oldValues = await getCourse(req.params.id)
-  const deleted = await deleteCourse(req.params.id)
+  if (!oldValues) return res.status(404).json({ message: 'Unit not found.' })
+  const blockers = await getAcademicDeleteBlockers('unit', req.params.id)
+  if (Object.keys(blockers).length) {
+    const references = Object.entries(blockers)
+      .map(([table, count]) => `${count} ${table.replaceAll('_', ' ')}`)
+      .join(', ')
+    return res.status(409).json({
+      message: `Cannot delete unit: referenced by ${references}. Remove or reassign those records first.`
+    })
+  }
+  const deleted = await deleteAcademicRecord('unit', req.params.id)
   if (deleted) {
     await auditRequest(req, {
       action: 'DELETE',
       entityType: 'unit',
       entityId: req.params.id,
       oldValues
+    })
+    emitSocketEvent('academic:deleted', {
+      entity: 'unit',
+      id: req.params.id,
+      record: oldValues
     })
   }
   res.json({ success: deleted })

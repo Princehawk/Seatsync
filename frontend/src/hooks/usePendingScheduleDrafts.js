@@ -1,106 +1,139 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 
 const STORAGE_KEY = 'seatsync-pending-schedule-drafts'
-const CHANGE_EVENT = 'seatsync-pending-schedule-drafts-changed'
-
-const readDrafts = () => {
-  if (typeof window === 'undefined') return []
-  try {
-    const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]')
-    return Array.isArray(value) ? value : []
-  } catch {
-    return []
-  }
-}
-
-const writeDrafts = drafts => {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(drafts))
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT))
-}
 
 export default function usePendingScheduleDrafts () {
   const queryClient = useQueryClient()
-  const [drafts, setDrafts] = useState(readDrafts)
+  const { user } = useAuth()
   const [isPublishing, setIsPublishing] = useState(false)
   const [publishError, setPublishError] = useState('')
+  const legacyImportStarted = useRef(false)
+
+  const { data: drafts = [], isFetched } = useQuery({
+    queryKey: ['schedule-drafts', user?.id],
+    queryFn: async () => {
+      const response = await api.get('/api/schedules/drafts')
+      return Array.isArray(response?.data) ? response.data : []
+    },
+    enabled: Boolean(user?.id)
+  })
 
   useEffect(() => {
-    const sync = () => setDrafts(readDrafts())
-    window.addEventListener(CHANGE_EVENT, sync)
-    window.addEventListener('storage', sync)
-    return () => {
-      window.removeEventListener(CHANGE_EVENT, sync)
-      window.removeEventListener('storage', sync)
-    }
-  }, [])
-
-  const stageDraft = useCallback(async (kind, payload, createdBy = null) => {
-    const current = readDrafts()
-    const draft = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      kind,
-      payload,
-      createdBy
-    }
-    setPublishError('')
+    if (!isFetched || legacyImportStarted.current) return
+    legacyImportStarted.current = true
+    let localDrafts = []
     try {
-      await api.post('/api/schedules/validate', {
-        draft,
-        pendingDrafts: current
-      })
-      writeDrafts([...current, draft])
-      return draft
-    } catch (error) {
-      setPublishError(
-        error.message || 'Schedule conflicts must be resolved first.'
+      const parsed = JSON.parse(
+        window.localStorage.getItem(STORAGE_KEY) || '[]'
       )
-      throw error
+      if (Array.isArray(parsed)) localDrafts = parsed
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY)
     }
-  }, [])
+    if (!localDrafts.length) return
 
-  const removeDraft = useCallback(id => {
-    writeDrafts(readDrafts().filter(draft => draft.id !== id))
-  }, [])
-
-  const updateDraft = useCallback(async (id, payload) => {
-    const current = readDrafts()
-    const original = current.find(draft => draft.id === id)
-    if (!original) throw new Error('This pending draft no longer exists.')
-    const updated = { ...original, payload }
-    const others = current.filter(draft => draft.id !== id)
-    setPublishError('')
-    try {
-      await api.post('/api/schedules/validate', {
-        draft: updated,
-        pendingDrafts: others
-      })
-      writeDrafts(current.map(draft => (draft.id === id ? updated : draft)))
-      return updated
-    } catch (error) {
+    const knownIds = new Set(drafts.map(draft => String(draft.id)))
+    const remaining = []
+    const importDrafts = async () => {
+      for (const draft of localDrafts) {
+        if (knownIds.has(String(draft.id))) continue
+        try {
+          await api.post('/api/schedules/drafts', draft)
+        } catch (error) {
+          remaining.push(draft)
+          console.warn('[SCHEDULE][LEGACY_DRAFT_IMPORT_FAILED]', error.message)
+        }
+      }
+      if (remaining.length) {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining))
+        setPublishError(
+          `${remaining.length} older local draft(s) could not be moved to shared storage. Resolve conflicts or permissions, then reload to retry.`
+        )
+      } else {
+        window.localStorage.removeItem(STORAGE_KEY)
+      }
+      await queryClient.invalidateQueries({ queryKey: ['schedule-drafts'] })
+    }
+    importDrafts().catch(error => {
       setPublishError(
-        error.message || 'Schedule conflicts must be resolved first.'
+        error.message || 'Could not import older schedule drafts.'
       )
-      throw error
-    }
-  }, [])
+    })
+  }, [drafts, isFetched, queryClient])
+
+  useEffect(() => {
+    if (!publishError) return undefined
+    const timeout = setTimeout(() => setPublishError(''), 10000)
+    return () => clearTimeout(timeout)
+  }, [publishError])
+
+  const stageDraft = useCallback(
+    async (kind, payload, createdBy = null) => {
+      setPublishError('')
+      try {
+        const response = await api.post('/api/schedules/drafts', {
+          kind,
+          payload,
+          createdBy
+        })
+        await queryClient.invalidateQueries({ queryKey: ['schedule-drafts'] })
+        return response?.data
+      } catch (error) {
+        throw error
+      }
+    },
+    [queryClient]
+  )
+
+  const removeDraft = useCallback(
+    id => {
+      return api
+        .del(`/api/schedules/drafts/${encodeURIComponent(id)}`)
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: ['schedule-drafts'] })
+        )
+        .catch(error => {
+          setPublishError(
+            error.message || 'Unable to remove the pending draft.'
+          )
+          throw error
+        })
+    },
+    [queryClient]
+  )
+
+  const updateDraft = useCallback(
+    async (id, payload) => {
+      setPublishError('')
+      try {
+        const response = await api.put(
+          `/api/schedules/drafts/${encodeURIComponent(id)}`,
+          { payload }
+        )
+        await queryClient.invalidateQueries({ queryKey: ['schedule-drafts'] })
+        return response?.data
+      } catch (error) {
+        throw error
+      }
+    },
+    [queryClient]
+  )
 
   const publishDrafts = useCallback(
     async (selectedDrafts = null) => {
-      const batch = selectedDrafts || readDrafts()
+      const batch = selectedDrafts || drafts
       if (!batch.length) return
-      const pendingBeforePublish = readDrafts()
       setIsPublishing(true)
       setPublishError('')
       try {
         await api.post('/api/schedules/publish', {
-          drafts: batch,
-          pendingDrafts: pendingBeforePublish
+          draftIds: batch.map(draft => draft.id)
         })
-        const publishedIds = new Set(batch.map(draft => draft.id))
-        writeDrafts(readDrafts().filter(draft => !publishedIds.has(draft.id)))
         await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['schedule-drafts'] }),
           queryClient.invalidateQueries({ queryKey: ['timetable'] }),
           queryClient.invalidateQueries({ queryKey: ['exams'] }),
           queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] }),
@@ -116,7 +149,7 @@ export default function usePendingScheduleDrafts () {
         setIsPublishing(false)
       }
     },
-    [queryClient]
+    [drafts, queryClient]
   )
 
   return {
