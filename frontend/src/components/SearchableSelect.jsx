@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 export default function SearchableSelect ({
   options = [],
@@ -17,15 +17,14 @@ export default function SearchableSelect ({
   const selectedOptions = options.filter(option =>
     selectedValues.includes(String(option.value))
   )
-  const visibleOptions = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    if (!needle) return options
-    return options.filter(option =>
-      String(option.label ?? '')
-        .toLowerCase()
-        .includes(needle)
-    )
-  }, [options, search])
+  const needle = search.trim().toLowerCase()
+  const visibleOptions = needle
+    ? options.filter(option =>
+        `${option.label ?? ''} ${option.searchText ?? ''}`
+          .toLowerCase()
+          .includes(needle)
+      )
+    : options
 
   const closeMenu = () => {
     setIsOpen(false)

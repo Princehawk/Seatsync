@@ -207,7 +207,10 @@ export default function CohortsPage () {
                     { value: '', label: 'Select programme' },
                     ...(programmes || []).map(programme => ({
                       value: programme.id ?? programme.code,
-                      label: programme.name || programme.code
+                      label: programme.name || programme.code,
+                      searchText: `${programme.name || ''} ${
+                        programme.code || ''
+                      }`
                     }))
                   ]}
                   value={form.programme_id}
@@ -291,14 +294,15 @@ export default function CohortsPage () {
               setSearch(event.target.value)
               setPage(1)
             }}
-            placeholder='Search cohorts'
+            placeholder='Search cohorts, programme names or codes'
           />
           <SearchableSelect
             options={[
               { value: 'all', label: 'All programmes' },
               ...programmes.map(item => ({
                 value: item.id,
-                label: item.name || item.code
+                label: item.name || item.code,
+                searchText: `${item.name || ''} ${item.code || ''}`
               }))
             ]}
             value={programmeFilter}
@@ -532,7 +536,8 @@ export default function CohortsPage () {
                       { value: '', label: 'Select programme' },
                       ...programmes.map(item => ({
                         value: item.id,
-                        label: item.name || item.code
+                        label: item.name || item.code,
+                        searchText: `${item.name || ''} ${item.code || ''}`
                       }))
                     ]}
                     value={editForm.programme_id}

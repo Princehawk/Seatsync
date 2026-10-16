@@ -444,8 +444,12 @@ export const listCohorts = async options => {
   const clauses = ['c.is_active = TRUE']
   const params = []
   if (options.search) {
-    clauses.push('(c.name LIKE ? OR p.name LIKE ?)')
-    params.push(`%${options.search}%`, `%${options.search}%`)
+    clauses.push('(c.name LIKE ? OR p.name LIKE ? OR p.code LIKE ?)')
+    params.push(
+      `%${options.search}%`,
+      `%${options.search}%`,
+      `%${options.search}%`
+    )
   }
   if (options.programme) {
     clauses.push('c.programme_id = ?')

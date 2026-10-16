@@ -24,7 +24,9 @@ export default function AcademicRecordsTable ({
         const matchesSearch =
           !needle ||
           columns.some(column =>
-            String(getColumnValue(record, column) ?? '')
+            `${getColumnValue(record, column) ?? ''} ${
+              column.searchValue ? column.searchValue(record) : ''
+            }`
               .toLowerCase()
               .includes(needle)
           )

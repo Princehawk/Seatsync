@@ -823,7 +823,10 @@ export default function AcademicSetupPage () {
                     <SearchableSelect
                       options={departments.map(department => ({
                         value: department.id ?? department.code,
-                        label: department.name || department.code
+                        label: department.name || department.code,
+                        searchText: `${department.name || ''} ${
+                          department.code || ''
+                        }`
                       }))}
                       value={forms.programme.department_id}
                       onChange={value =>
@@ -1037,7 +1040,10 @@ export default function AcademicSetupPage () {
                     <SearchableSelect
                       options={programmes.map(programme => ({
                         value: programme.id ?? programme.code,
-                        label: programme.name || programme.code
+                        label: programme.name || programme.code,
+                        searchText: `${programme.name || ''} ${
+                          programme.code || ''
+                        }`
                       }))}
                       value={forms.cohort.programme_id}
                       onChange={value =>
@@ -1222,7 +1228,10 @@ export default function AcademicSetupPage () {
                     { value: 'all', label: 'All programmes' },
                     ...programmes.map(programme => ({
                       value: programme.id,
-                      label: programme.name || programme.code
+                      label: programme.name || programme.code,
+                      searchText: `${programme.name || ''} ${
+                        programme.code || ''
+                      }`
                     }))
                   ]}
                   value={unitForm.programme_ids}
@@ -1375,7 +1384,15 @@ export default function AcademicSetupPage () {
                       department =>
                         String(department.id) ===
                         String(item.department_id ?? item.departmentId)
-                    )?.name || 'Unassigned'
+                    )?.name || 'Unassigned',
+                  searchValue: item => {
+                    const department = departments.find(
+                      value =>
+                        String(value.id) ===
+                        String(item.department_id ?? item.departmentId)
+                    )
+                    return `${department?.name || ''} ${department?.code || ''}`
+                  }
                 },
                 {
                   key: 'duration',
@@ -1392,7 +1409,8 @@ export default function AcademicSetupPage () {
                   value: item => item.department_id ?? item.departmentId ?? '',
                   options: departments.map(item => ({
                     value: item.id,
-                    label: item.name || item.code
+                    label: item.name || item.code,
+                    searchText: `${item.name || ''} ${item.code || ''}`
                   }))
                 }
               ]}
@@ -1500,7 +1518,15 @@ export default function AcademicSetupPage () {
                       programme =>
                         String(programme.id) ===
                         String(item.programme_id ?? item.programmeId)
-                    )?.name || 'Unassigned'
+                    )?.name || 'Unassigned',
+                  searchValue: item => {
+                    const programme = programmes.find(
+                      value =>
+                        String(value.id) ===
+                        String(item.programme_id ?? item.programmeId)
+                    )
+                    return `${programme?.name || ''} ${programme?.code || ''}`
+                  }
                 },
                 {
                   key: 'year',
@@ -1526,7 +1552,8 @@ export default function AcademicSetupPage () {
                   value: item => item.programme_id ?? item.programmeId ?? '',
                   options: programmes.map(item => ({
                     value: item.id,
-                    label: item.name || item.code
+                    label: item.name || item.code,
+                    searchText: `${item.name || ''} ${item.code || ''}`
                   }))
                 }
               ]}
@@ -1544,12 +1571,15 @@ export default function AcademicSetupPage () {
                 <input
                   value={unitSearch}
                   onChange={event => setUnitSearch(event.target.value)}
-                  placeholder='Search units'
+                  placeholder='Search units by name or code'
                 />
                 <SearchableSelect
                   options={programmes.map(programme => ({
                     value: programme.id,
-                    label: programme.name || programme.code
+                    label: programme.name || programme.code,
+                    searchText: `${programme.name || ''} ${
+                      programme.code || ''
+                    }`
                   }))}
                   value={unitProgrammeFilter}
                   onChange={setUnitProgrammeFilter}

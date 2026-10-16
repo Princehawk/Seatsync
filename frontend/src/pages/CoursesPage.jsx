@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import PaginationControls from '../components/PaginationControls'
+import SearchableSelect from '../components/SearchableSelect'
 import { useAuth } from '../context/AuthContext'
 
 const toArray = value => {
@@ -65,6 +66,7 @@ export default function CoursesPage () {
   const [form, setForm] = useState(emptyUnit)
   const [formError, setFormError] = useState('')
   const [unitDepartmentSearch, setUnitDepartmentSearch] = useState('')
+  const [unitProgrammeSearch, setUnitProgrammeSearch] = useState('')
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [programmeFilter, setProgrammeFilter] = useState('all')
@@ -150,6 +152,31 @@ export default function CoursesPage () {
       programme.name || programme.code
     ])
   )
+  const getUnitDepartmentNames = unit => {
+    const directDepartmentIds =
+      unit.departmentIds ??
+      unit.department_ids ??
+      [unit.department_id ?? unit.departmentId].filter(Boolean)
+    const unitProgrammeIds = unit.programmeIds ?? unit.programme_ids ?? []
+    const departmentIds = [
+      ...(Array.isArray(directDepartmentIds) ? directDepartmentIds : []),
+      ...(Array.isArray(unitProgrammeIds) ? unitProgrammeIds : []).map(
+        programmeId => {
+          const programme = programmes.find(
+            item => String(item.id) === String(programmeId)
+          )
+          return programme?.department_id ?? programme?.departmentId
+        }
+      )
+    ]
+    const departmentNames = [
+      ...new Set(departmentIds.filter(Boolean).map(String))
+    ]
+      .map(id => departmentNameMap[id])
+      .filter(Boolean)
+
+    return departmentNames.length ? departmentNames.join(', ') : 'General'
+  }
 
   const createCourseMutation = useMutation({
     mutationFn: async payload => {
@@ -169,6 +196,7 @@ export default function CoursesPage () {
       )
       setForm(emptyUnit)
       setUnitDepartmentSearch('')
+      setUnitProgrammeSearch('')
       setFormError('')
     },
     onError: err => {
@@ -321,6 +349,14 @@ export default function CoursesPage () {
               </fieldset>
               <fieldset className='selection-container'>
                 <legend>Programmes</legend>
+                <input
+                  type='search'
+                  value={unitProgrammeSearch}
+                  onChange={event => setUnitProgrammeSearch(event.target.value)}
+                  placeholder='Search programmes by name or code'
+                  aria-label='Search programmes for unit'
+                  disabled={!form.department_ids.length}
+                />
                 <span className='checkbox-list'>
                   {programmes
                     .filter(programme =>
@@ -329,6 +365,11 @@ export default function CoursesPage () {
                           programme.department_id ?? programme.departmentId
                         )
                       )
+                    )
+                    .filter(programme =>
+                      `${programme.name || ''} ${programme.code || ''}`
+                        .toLowerCase()
+                        .includes(unitProgrammeSearch.trim().toLowerCase())
                     )
                     .map(programme => (
                       <label key={programme.id} className='checkbox-option'>
@@ -353,6 +394,18 @@ export default function CoursesPage () {
                   {!form.department_ids.length && (
                     <small>Select one or more departments first.</small>
                   )}
+                  {form.department_ids.length > 0 &&
+                    !programmes.some(
+                      programme =>
+                        form.department_ids.includes(
+                          String(
+                            programme.department_id ?? programme.departmentId
+                          )
+                        ) &&
+                        `${programme.name || ''} ${programme.code || ''}`
+                          .toLowerCase()
+                          .includes(unitProgrammeSearch.trim().toLowerCase())
+                    ) && <small>No programmes match your search.</small>}
                 </span>
               </fieldset>
               <label className='selection-container'>
@@ -472,34 +525,42 @@ export default function CoursesPage () {
             }}
             placeholder='Search units by code or name'
           />
-          <select
+          <SearchableSelect
+            options={[
+              { value: 'all', label: 'All departments' },
+              ...departments.map(department => ({
+                value: department.id,
+                label: department.name || department.code,
+                searchText: `${department.name || ''} ${department.code || ''}`
+              }))
+            ]}
             value={departmentFilter}
-            onChange={event => {
-              setDepartmentFilter(event.target.value)
+            onChange={value => {
+              setDepartmentFilter(value)
               setPage(1)
             }}
-          >
-            <option value='all'>All departments</option>
-            {departments.map(department => (
-              <option key={department.id} value={department.id}>
-                {department.name || department.code}
-              </option>
-            ))}
-          </select>
-          <select
+            placeholder='All departments'
+            searchPlaceholder='Search departments'
+            ariaLabel='Search unit department filters'
+          />
+          <SearchableSelect
+            options={[
+              { value: 'all', label: 'All programmes' },
+              ...programmes.map(programme => ({
+                value: programme.id,
+                label: programme.name || programme.code,
+                searchText: `${programme.name || ''} ${programme.code || ''}`
+              }))
+            ]}
             value={programmeFilter}
-            onChange={event => {
-              setProgrammeFilter(event.target.value)
+            onChange={value => {
+              setProgrammeFilter(value)
               setPage(1)
             }}
-          >
-            <option value='all'>All programmes</option>
-            {programmes.map(programme => (
-              <option key={programme.id} value={programme.id}>
-                {programme.name || programme.code}
-              </option>
-            ))}
-          </select>
+            placeholder='All programmes'
+            searchPlaceholder='Search programmes'
+            ariaLabel='Search unit programme filters'
+          />
           <select
             value={yearFilter}
             onChange={event => {
@@ -560,11 +621,7 @@ export default function CoursesPage () {
                     <tr key={item.id ?? item.code}>
                       <td>{item.code || 'N/A'}</td>
                       <td>{item.name || item.course_name || 'Unnamed unit'}</td>
-                      <td>
-                        {departmentNameMap[
-                          String(item.department_id ?? item.departmentId)
-                        ] || 'General'}
-                      </td>
+                      <td>{getUnitDepartmentNames(item)}</td>
                       <td>
                         {(item.programmeIds || [])
                           .map(id => programmeNameMap[String(id)])
