@@ -6,6 +6,7 @@ import { api } from '../api/client'
 import AcademicRecordsTable from '../components/AcademicRecordsTable'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import SearchableSelect from '../components/SearchableSelect'
+import { SOCKET_BASE_URL } from '../config.js'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -218,13 +219,10 @@ export default function AcademicSetupPage () {
   }, [showBuilder, editingRecord, unitToEdit])
 
   useEffect(() => {
-    const socket = io(
-      import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000',
-      {
-        transports: ['websocket'],
-        withCredentials: true
-      }
-    )
+    const socket = io(SOCKET_BASE_URL, {
+      transports: ['websocket'],
+      withCredentials: true
+    })
 
     socket.on('academic:updated', ({ entity, id }) => {
       queryClient.invalidateQueries({ queryKey: ['academic-faculties'] })
