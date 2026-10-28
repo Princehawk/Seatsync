@@ -137,6 +137,20 @@ export default function ExamsPage () {
     }
   })
 
+  const examVenueLabel = venueDetails => {
+    const venueId =
+      venueDetails.id ?? venueDetails.venue_id ?? venueDetails.venueId
+    const venue = venues.find(item => String(item.id) === String(venueId))
+    const code = venueDetails.code ?? venueDetails.venue_code ?? venue?.code
+    const name =
+      venueDetails.name ??
+      venueDetails.venue_name ??
+      venue?.name ??
+      venue?.venue_name ??
+      'Venue'
+    return `${code ? `${code} · ` : ''}${name}`
+  }
+
   const { data: academicYears = [] } = useQuery({
     queryKey: ['exam-academic-year-options'],
     queryFn: async () => {
@@ -1507,7 +1521,10 @@ export default function ExamsPage () {
                       </td>
                       <td>
                         {(item.venueDetails || [])
-                          .map(venue => `${venue.name} (${venue.capacity})`)
+                          .map(
+                            venue =>
+                              `${examVenueLabel(venue)} (${venue.capacity})`
+                          )
                           .join(', ') || 'N/A'}
                       </td>
                       {canManageExams && (

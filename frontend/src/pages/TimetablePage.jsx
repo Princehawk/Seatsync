@@ -266,6 +266,27 @@ export default function TimetablePage () {
     }
   })
 
+  const semestersForEntry = useMemo(
+    () =>
+      semesters.filter(
+        semester =>
+          String(semester.academic_year_id ?? semester.academicYearId) ===
+          String(form.academic_year_id)
+      ),
+    [form.academic_year_id, semesters]
+  )
+  const semestersForFilter = useMemo(
+    () =>
+      selectedAcademicYear === 'all'
+        ? semesters
+        : semesters.filter(
+            semester =>
+              String(semester.academic_year_id ?? semester.academicYearId) ===
+              String(selectedAcademicYear)
+          ),
+    [selectedAcademicYear, semesters]
+  )
+
   const { data: programmes = [] } = useQuery({
     queryKey: ['timetable-programmes'],
     queryFn: async () => {
@@ -415,13 +436,28 @@ export default function TimetablePage () {
       programmeIds.some(id => form.programme_ids.includes(id))
     return semesterMatch && programmeMatch
   })
-  const eligibleLecturers = lecturers.filter(
-    lecturer =>
-      !form.programme_ids.length ||
-      (lecturer.programmeIds || []).some(id =>
-        form.programme_ids.includes(String(id))
-      )
+  const eligibleLecturers = useMemo(
+    () =>
+      lecturers.filter(lecturer => {
+        const unitIds = lecturer.unitIds ?? lecturer.unit_ids ?? []
+        return (
+          Boolean(form.course_id) &&
+          unitIds.some(id => String(id) === String(form.course_id))
+        )
+      }),
+    [form.course_id, lecturers]
   )
+
+  useEffect(() => {
+    if (!form.lecturer_id) return
+    const lecturerIsEligible = eligibleLecturers.some(
+      lecturer =>
+        String(lecturer.id ?? lecturer.email) === String(form.lecturer_id)
+    )
+    if (!lecturerIsEligible) {
+      setForm(current => ({ ...current, lecturer_id: '' }))
+    }
+  }, [eligibleLecturers, form.lecturer_id])
   const courseNameMap = useMemo(
     () =>
       Object.fromEntries(
@@ -452,6 +488,19 @@ export default function TimetablePage () {
       ),
     [venues]
   )
+  const venueDisplayName = venue => {
+    const venueId = venue.id ?? venue.venue_id ?? venue.venueId
+    const listedVenue = venues.find(item => String(item.id) === String(venueId))
+    const code =
+      venue.code ?? venue.venueCode ?? venue.venue_code ?? listedVenue?.code
+    const name =
+      venue.name ??
+      venue.venueName ??
+      venue.venue_name ??
+      listedVenue?.name ??
+      listedVenue?.venue_name
+    return `${code ? `${code} · ` : ''}${name || 'Venue'}`
+  }
   const unitNameMap = useMemo(
     () =>
       Object.fromEntries(
@@ -509,7 +558,9 @@ export default function TimetablePage () {
   const eventVenues = event =>
     event.event_type === 'EXAM'
       ? (event.venueDetails || [])
-          .map(venue => `${venue.name} (${venue.capacity} allocated)`)
+          .map(
+            venue => `${venueDisplayName(venue)} (${venue.capacity} allocated)`
+          )
           .join(', ')
       : venueNameMap[String(event.venue_id ?? event.venueId)] || 'Venue'
 
@@ -520,10 +571,12 @@ export default function TimetablePage () {
         0
       )
       return `${event.venueDetails
-        .map(venue => `${venue.name} (${venue.capacity} allocated)`)
+        .map(
+          venue => `${venueDisplayName(venue)} (${venue.capacity} allocated)`
+        )
         .join(', ')} · Total allocated: ${total}`
     }
-    return details.venue?.name || ''
+    return details.venue ? venueDisplayName(details.venue) : ''
   }
 
   const createEntryMutation = useMutation({
@@ -1335,7 +1388,12 @@ export default function TimetablePage () {
                   onChange={event =>
                     setForm(current => ({
                       ...current,
-                      academic_year_id: event.target.value
+                      academic_year_id: event.target.value,
+                      semester_id: '',
+                      programme_ids: [],
+                      cohort_ids: [],
+                      course_id: '',
+                      lecturer_id: ''
                     }))
                   }
                 >
@@ -1355,6 +1413,7 @@ export default function TimetablePage () {
                 Semester
                 <select
                   value={form.semester_id}
+                  disabled={!form.academic_year_id}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -1365,8 +1424,12 @@ export default function TimetablePage () {
                     }))
                   }
                 >
-                  <option value=''>Select semester</option>
-                  {(semesters || []).map(semester => (
+                  <option value=''>
+                    {form.academic_year_id
+                      ? 'Select semester'
+                      : 'Select academic year first'}
+                  </option>
+                  {semestersForEntry.map(semester => (
                     <option
                       key={semester.id ?? semester.name}
                       value={semester.id ?? semester.name}
@@ -1459,7 +1522,8 @@ export default function TimetablePage () {
                   onChange={event =>
                     setForm(current => ({
                       ...current,
-                      course_id: event.target.value
+                      course_id: event.target.value,
+                      lecturer_id: ''
                     }))
                   }
                 >
@@ -1484,7 +1548,7 @@ export default function TimetablePage () {
                 Lecturer
                 <select
                   value={form.lecturer_id}
-                  disabled={!form.programme_ids.length}
+                  disabled={!form.course_id}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -1493,9 +1557,7 @@ export default function TimetablePage () {
                   }
                 >
                   <option value=''>
-                    {form.programme_ids.length
-                      ? 'Select lecturer'
-                      : 'Select programme first'}
+                    {form.course_id ? 'Select lecturer' : 'Select unit first'}
                   </option>
                   {eligibleLecturers.map(lecturer => (
                     <option
@@ -1505,6 +1567,9 @@ export default function TimetablePage () {
                       {lecturer.name || lecturer.full_name || lecturer.email}
                     </option>
                   ))}
+                  {form.course_id && !eligibleLecturers.length && (
+                    <option disabled>No lecturers assigned to this unit</option>
+                  )}
                 </select>
               </label>
 
@@ -1674,7 +1739,10 @@ export default function TimetablePage () {
           />
           <select
             value={selectedAcademicYear}
-            onChange={event => setSelectedAcademicYear(event.target.value)}
+            onChange={event => {
+              setSelectedAcademicYear(event.target.value)
+              setSelectedSemester('all')
+            }}
           >
             <option value='all'>Academic year</option>
             {(academicYears || []).map(year => (
@@ -1688,7 +1756,7 @@ export default function TimetablePage () {
             onChange={event => setSelectedSemester(event.target.value)}
           >
             <option value='all'>Semester</option>
-            {(semesters || []).map(semester => (
+            {semestersForFilter.map(semester => (
               <option
                 key={semester.id ?? semester.name}
                 value={semester.id ?? semester.name}
