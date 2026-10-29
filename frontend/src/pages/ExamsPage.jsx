@@ -65,9 +65,15 @@ export default function ExamsPage () {
   const [capacityWarning, setCapacityWarning] = useState(null)
   const [sortBy, setSortBy] = useState('date')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [today, setToday] = useState(todayInputDate)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [examToDelete, setExamToDelete] = useState(null)
+
+  useEffect(() => {
+    const timer = setInterval(() => setToday(todayInputDate()), 60000)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (!formError) return undefined
@@ -1511,7 +1517,13 @@ export default function ExamsPage () {
                       >
                         <span>{item.programmes || 'All assigned'}</span>
                       </td>
-                      <td>{item.status || 'SCHEDULED'}</td>
+                      <td>
+                        {item.exam_date && item.exam_date < today ? (
+                          <span className='status-badge muted'>Ended</span>
+                        ) : (
+                          item.status || 'SCHEDULED'
+                        )}
+                      </td>
                       <td>{item.start_time || 'TBA'}</td>
                       <td>{item.end_time || 'TBA'}</td>
                       <td>
@@ -1527,27 +1539,31 @@ export default function ExamsPage () {
                           )
                           .join(', ') || 'N/A'}
                       </td>
-                      {canManageExams && (
-                        <td>
-                          <button
-                            type='button'
-                            className='table-action'
-                            onClick={() => editExam(item)}
-                          >
-                            Edit exam
-                          </button>
-                          <button
-                            type='button'
-                            className='table-action danger'
-                            onClick={() => {
-                              deleteExamMutation.reset()
-                              setExamToDelete(item)
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      )}
+                      {canManageExams &&
+                        (!item.exam_date || item.exam_date >= today) && (
+                          <td>
+                            <button
+                              type='button'
+                              className='table-action'
+                              onClick={() => editExam(item)}
+                            >
+                              Edit exam
+                            </button>
+                            <button
+                              type='button'
+                              className='table-action danger'
+                              onClick={() => {
+                                deleteExamMutation.reset()
+                                setExamToDelete(item)
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        )}
+                      {canManageExams &&
+                        item.exam_date &&
+                        item.exam_date < today && <td />}
                     </tr>
                   ))
                 ) : (
