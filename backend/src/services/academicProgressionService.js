@@ -38,62 +38,6 @@ export const listSemesterTypes = async () =>
     'SELECT id, name, number, is_active FROM semester_types ORDER BY number'
   )
 
-export const createSemesterType = async payload => {
-  const name = String(payload.name || '').trim()
-  const number = Number(payload.number)
-  if (!name || !Number.isInteger(number) || number < 1) {
-    throw new Error('Semester type name and a positive number are required.')
-  }
-  const connection = await db.getConnection()
-  try {
-    await connection.beginTransaction()
-    const [existing] = await connection.execute(
-      'SELECT id FROM semester_types WHERE number = ? OR name = ? LIMIT 1 FOR UPDATE',
-      [number, name]
-    )
-    if (existing.length) {
-      throw new Error('A semester type with this name or number already exists.')
-    }
-    const [insert] = await connection.execute(
-      'INSERT INTO semester_types (name, number, is_active) VALUES (?, ?, TRUE)',
-      [name, number]
-    )
-    const [programmes] = await connection.execute(
-      'SELECT id, code, duration_years FROM programmes WHERE is_active = TRUE'
-    )
-    for (const programme of programmes) {
-      for (
-        let studyYear = 1;
-        studyYear <= Number(programme.duration_years);
-        studyYear += 1
-      ) {
-        await connection.execute(
-          `INSERT IGNORE INTO cohort_types
-            (programme_id, name, study_year, semester_number)
-           VALUES (?, ?, ?, ?)`,
-          [
-            programme.id,
-            `${programme.code} ${studyYear}.${number}`,
-            studyYear,
-            number
-          ]
-        )
-      }
-    }
-    const [created] = await connection.execute(
-      'SELECT id, name, number, is_active FROM semester_types WHERE id = ?',
-      [insert.insertId]
-    )
-    await connection.commit()
-    return created[0]
-  } catch (error) {
-    await connection.rollback()
-    throw error
-  } finally {
-    connection.release()
-  }
-}
-
 export const listCohortTypes = async programmeId => {
   if (!programmeId) return []
   return query(
@@ -138,7 +82,8 @@ export const listEligibleCohorts = async ({
   academicYearId,
   semesterId,
   programmeId,
-  studyYear
+  studyYear,
+  user
 }) => {
   if (!academicYearId || !semesterId || !programmeId || !studyYear) return []
   const period = await query(
@@ -150,6 +95,24 @@ export const listEligibleCohorts = async ({
   if (!period.length) {
     throw new Error('The selected semester does not belong to the academic year.')
   }
+  const roles = normalizeRoles(user)
+  let lecturerTypes = []
+  if (roles.includes('LECTURER')) {
+    const lecturer = await query(
+      'SELECT id FROM lecturers WHERE user_id = ? AND employment_status = ? LIMIT 1',
+      [Number(user.id), 'ACTIVE']
+    )
+    if (!lecturer.length) return []
+    const assigned = await query(
+      'SELECT cohort_type_id FROM lecturer_cohort_types WHERE lecturer_id = ?',
+      [lecturer[0].id]
+    )
+    lecturerTypes = assigned.map(item => Number(item.cohort_type_id))
+    if (!lecturerTypes.length) return []
+  }
+  const lecturerTypeFilter = lecturerTypes.length
+    ? `AND cp.cohort_type_id IN (${lecturerTypes.map(() => '?').join(',')})`
+    : ''
   return query(
     `SELECT c.id, c.name, c.programme_id, cp.student_count,
         ct.id AS cohort_type_id, ct.name AS cohort_type_name,
@@ -161,13 +124,14 @@ export const listEligibleCohorts = async ({
      WHERE cp.academic_year_id = ? AND cp.semester_id = ?
        AND c.programme_id = ? AND ct.study_year = ?
        AND ct.programme_id = c.programme_id
-       AND ct.study_year <= p.duration_years
+       AND ct.study_year <= p.duration_years ${lecturerTypeFilter}
      ORDER BY c.name, c.id`,
     [
       Number(academicYearId),
       Number(semesterId),
       Number(programmeId),
-      Number(studyYear)
+      Number(studyYear),
+      ...lecturerTypes
     ]
   )
 }

@@ -2,7 +2,6 @@ import { emitSocketEvent } from '../socket/socketEvents.js'
 import {
   createCohortProgression,
   createCohortWithProgression,
-  createSemesterType,
   listCohortProgressions,
   listCohortTypes,
   listEligibleCohorts,
@@ -48,6 +47,12 @@ import {
   getAcademicDeleteBlockers
 } from '../services/academicStructureService.js'
 import { createAuditLog } from '../services/security/securityService.js'
+import {
+  listCohortMembershipRequests,
+  listPendingCohortProfileRequests,
+  reviewCohortMembershipRequest,
+  reviewCohortProfileRequest
+} from '../services/cohortApprovalService.js'
 import {
   getLecturerAcademicProfile,
   updateLecturerAcademicProfile
@@ -125,14 +130,6 @@ export const getSemesterTypes = async (req, res) => {
   res.json({ data: await listSemesterTypes() })
 }
 
-export const addSemesterType = async (req, res) => {
-  try {
-    res.status(201).json({ data: await createSemesterType(req.body) })
-  } catch (error) {
-    res.status(409).json({ message: error.message })
-  }
-}
-
 export const getCohortTypes = async (req, res) => {
   res.json({ data: await listCohortTypes(req.query.programmeId) })
 }
@@ -143,7 +140,8 @@ export const getEligibleCohorts = async (req, res) => {
       academicYearId: req.query.academicYearId,
       semesterId: req.query.semesterId,
       programmeId: req.query.programmeId,
-      studyYear: req.query.studyYear
+      studyYear: req.query.studyYear,
+      user: req.user
     })
     res.json({ data })
   } catch (error) {
@@ -178,6 +176,66 @@ export const addCohortProgression = async (req, res) => {
   } catch (error) {
     const status = error.message.includes('only manage') ? 403 : 409
     res.status(status).json({ message: error.message })
+  }
+}
+
+export const getPendingCohortProfileRequests = async (_req, res) => {
+  res.json({ data: await listPendingCohortProfileRequests() })
+}
+
+export const reviewPendingCohortProfileRequest = async (req, res) => {
+  try {
+    const data = await reviewCohortProfileRequest(
+      req.params.requestId,
+      req.body?.decision,
+      req.user.id
+    )
+    emitSocketEvent('academic:updated', {
+      entity: 'cohort_profile_request',
+      id: data.id,
+      cohortId: data.cohortId
+    })
+    emitSocketEvent('timetable:changed', {
+      action: 'cohort-profile-approved',
+      ids: data.cohortId ? [data.cohortId] : []
+    })
+    return res.json({ data })
+  } catch (error) {
+    return res.status(409).json({ message: error.message })
+  }
+}
+
+export const getCohortMembershipRequests = async (req, res) => {
+  try {
+    return res.json({
+      data: await listCohortMembershipRequests(req.params.id, req.user)
+    })
+  } catch (error) {
+    const status = error.message.includes('only manage') ? 403 : 400
+    return res.status(status).json({ message: error.message })
+  }
+}
+
+export const reviewCohortMembership = async (req, res) => {
+  try {
+    const data = await reviewCohortMembershipRequest(
+      req.params.requestId,
+      req.body?.decision,
+      req.user
+    )
+    emitSocketEvent('academic:updated', {
+      entity: 'cohort_membership',
+      id: data.id,
+      cohortId: data.cohortId
+    })
+    emitSocketEvent('timetable:changed', {
+      action: 'cohort-membership-updated',
+      ids: data.cohortId ? [data.cohortId] : []
+    })
+    return res.json({ data })
+  } catch (error) {
+    const status = error.message.includes('only manage') ? 403 : 409
+    return res.status(status).json({ message: error.message })
   }
 }
 
@@ -452,6 +510,14 @@ export const editLecturerAcademicDetails = async (req, res) => {
       entityId: lecturer.id,
       oldValues,
       newValues: data
+    })
+    emitSocketEvent('academic:updated', {
+      entity: 'lecturer_profile',
+      id: lecturer.id
+    })
+    emitSocketEvent('timetable:changed', {
+      action: 'lecturer-profile-updated',
+      ids: [lecturer.id]
     })
     return res.json({ data })
   } catch (error) {

@@ -5,6 +5,7 @@ import {
   refresh,
   registrationOptions,
   profileStatus,
+  studentAcademicProfile,
   completeProfile,
   lecturerProfile,
   updateLecturerProfile,
@@ -21,6 +22,12 @@ const router = express.Router()
 router.post('/register', register)
 router.get('/registration-options', registrationOptions)
 router.get('/profile-status', requireAuth, profileStatus)
+router.get(
+  '/student-profile',
+  requireAuth,
+  requireRole('STUDENT', 'CLASS_REP'),
+  studentAcademicProfile
+)
 router.post('/complete-profile', requireAuth, completeProfile)
 router.get(
   '/lecturer-profile',

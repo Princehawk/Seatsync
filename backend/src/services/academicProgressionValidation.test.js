@@ -15,11 +15,13 @@ const makeConnection = ({
   },
   unit = { id: 12, semester_type_id: 1, year_level: 2 },
   unitProgrammes = [{ programme_id: 4 }],
+  assignedTypes = [{ cohort_type_id: 5 }],
   progressions = [
     {
       cohort_id: 9,
       student_count: 21,
       programme_id: 4,
+      cohort_type_id: 5,
       study_year: 2,
       semester_number: 1,
       type_programme_id: 4,
@@ -32,6 +34,7 @@ const makeConnection = ({
     if (sql.includes('FROM units')) return [[unit]]
     if (sql.includes('FROM unit_programmes')) return [unitProgrammes]
     if (sql.includes('FROM cohort_progressions')) return [progressions]
+    if (sql.includes('FROM lecturer_cohort_types')) return [assignedTypes]
     throw new Error(`Unexpected validation query: ${sql}`)
   }
 })
@@ -92,6 +95,22 @@ test('rejects a cohort progression outside its programme duration', async () => 
     ),
     /must match the study year, semester, and programme/
   )
+})
+
+test('requires a lecturer to be assigned every selected cohort type', async () => {
+  await assert.rejects(
+    validateAcademicPeriod(
+      makeConnection({ assignedTypes: [{ cohort_type_id: 99 }] }),
+      { ...validSelection, lecturerId: 3 }
+    ),
+    /lecturer is not assigned to teach every selected cohort type/
+  )
+
+  const result = await validateAcademicPeriod(
+    makeConnection(),
+    { ...validSelection, lecturerId: 3 }
+  )
+  assert.equal(result.progressions[0].cohort_type_id, 5)
 })
 
 test('requires exam dates to fall within the selected actual semester', async () => {

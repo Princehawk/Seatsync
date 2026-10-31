@@ -564,6 +564,14 @@ export const listCohorts = async (options, user) => {
     return (
       await rawQuery(`
       SELECT c.*, p.department_id,
+        (SELECT COUNT(*) FROM students submitted
+         WHERE submitted.cohort_id = c.id) +
+        (SELECT COUNT(*) FROM cohort_membership_requests pending
+         WHERE pending.cohort_id = c.id AND pending.status = 'PENDING')
+          AS submitted_profile_count,
+        (SELECT COUNT(*) FROM cohort_membership_requests pending
+         WHERE pending.cohort_id = c.id AND pending.status = 'PENDING')
+          AS pending_profile_count,
         (SELECT ct.name FROM cohort_progressions cp
          JOIN cohort_types ct ON ct.id = cp.cohort_type_id
          JOIN semesters s ON s.id = cp.semester_id
@@ -619,6 +627,14 @@ export const listCohorts = async (options, user) => {
     String(options.direction).toLowerCase() === 'desc' ? 'DESC' : 'ASC'
   const rows = await rawQuery(
     `SELECT c.*, p.department_id,
+      (SELECT COUNT(*) FROM students submitted
+       WHERE submitted.cohort_id = c.id) +
+      (SELECT COUNT(*) FROM cohort_membership_requests pending
+       WHERE pending.cohort_id = c.id AND pending.status = 'PENDING')
+        AS submitted_profile_count,
+      (SELECT COUNT(*) FROM cohort_membership_requests pending
+       WHERE pending.cohort_id = c.id AND pending.status = 'PENDING')
+        AS pending_profile_count,
       (SELECT ct.name FROM cohort_progressions cp
        JOIN cohort_types ct ON ct.id = cp.cohort_type_id
        JOIN semesters s ON s.id = cp.semester_id

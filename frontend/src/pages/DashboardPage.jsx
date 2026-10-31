@@ -163,24 +163,28 @@ export default function DashboardPage () {
             </section>
           </div>
           <div className='panel-grid'>
-            <section className='content-panel'>
-              <h2>Available venues now</h2>
-              <ul className='simple-list'>
-                {renderList(
-                  lists.venueAvailability || [],
-                  'No venues are available right now'
-                )}
-              </ul>
-            </section>
-            <section className='content-panel'>
-              <h2>Occupied venues now</h2>
-              <ul className='simple-list'>
-                {renderList(
-                  lists.occupiedVenues || [],
-                  'No venues are occupied right now'
-                )}
-              </ul>
-            </section>
+            {summary.role !== 'STUDENT' && (
+              <>
+                <section className='content-panel'>
+                  <h2>Available venues now</h2>
+                  <ul className='simple-list'>
+                    {renderList(
+                      lists.venueAvailability || [],
+                      'No venues are available right now'
+                    )}
+                  </ul>
+                </section>
+                <section className='content-panel'>
+                  <h2>Occupied venues now</h2>
+                  <ul className='simple-list'>
+                    {renderList(
+                      lists.occupiedVenues || [],
+                      'No venues are occupied right now'
+                    )}
+                  </ul>
+                </section>
+              </>
+            )}
             <section className='content-panel'>
               <h2>Active make-up classes</h2>
               <ul className='simple-list'>

@@ -166,6 +166,7 @@ export const createTimetableEntry = async payload => {
       academicYearId: payload.academic_year_id ?? payload.academicYearId,
       semesterId: payload.semester_id ?? payload.semesterId,
       unitId: payload.course_id ?? payload.courseId,
+      lecturerId: payload.lecturer_id ?? payload.lecturerId,
       studyYear: payload.study_year ?? payload.studyYear,
       programmeIds,
       cohortIds
@@ -351,6 +352,7 @@ export const updateTimetableEntry = async (id, updates) => {
         safeFields.academic_year_id ?? existing.academic_year_id,
       semesterId: safeFields.semester_id ?? existing.semester_id,
       unitId: safeFields.unit_id ?? existing.unit_id,
+      lecturerId: safeFields.lecturer_id ?? existing.lecturer_id,
       programmeIds: effectiveProgrammeIds,
       cohortIds: effectiveCohortIds
     })

@@ -5,6 +5,7 @@ export const validateAcademicPeriod = async (
     semesterId,
     unitId,
     studyYear,
+    lecturerId,
     programmeIds = [],
     cohortIds = [],
     examDate
@@ -66,7 +67,8 @@ export const validateAcademicPeriod = async (
   }
   const [progressions] = await connection.execute(
     `SELECT cp.cohort_id, cp.student_count, c.programme_id,
-        ct.study_year, ct.semester_number, ct.programme_id AS type_programme_id,
+        cp.cohort_type_id, ct.study_year, ct.semester_number,
+        ct.programme_id AS type_programme_id,
         p.duration_years
      FROM cohort_progressions cp
      JOIN cohorts c ON c.id = cp.cohort_id AND c.is_active = TRUE
@@ -97,6 +99,25 @@ export const validateAcademicPeriod = async (
     throw new Error(
       'Selected cohorts must match the study year, semester, and programme.'
     )
+  }
+  if (lecturerId) {
+    const [assignedTypes] = await connection.execute(
+      'SELECT cohort_type_id FROM lecturer_cohort_types WHERE lecturer_id = ?',
+      [Number(lecturerId)]
+    )
+    const assignedIds = new Set(
+      assignedTypes.map(item => Number(item.cohort_type_id))
+    )
+    if (
+      !assignedIds.size ||
+      progressions.some(
+        progression => !assignedIds.has(Number(progression.cohort_type_id))
+      )
+    ) {
+      throw new Error(
+        'The lecturer is not assigned to teach every selected cohort type.'
+      )
+    }
   }
 
   if (examDate) {

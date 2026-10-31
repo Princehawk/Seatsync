@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { io } from 'socket.io-client'
 import { api } from '../api/client'
 import ConfirmActionModal from '../components/ConfirmActionModal'
 import PaginationControls from '../components/PaginationControls'
 import SearchableSelect from '../components/SearchableSelect'
 import { useAuth } from '../context/AuthContext'
+import { SOCKET_BASE_URL } from '../config.js'
 
 const toArray = value => {
   if (Array.isArray(value)) return value
@@ -52,6 +54,19 @@ export default function CohortsPage () {
   const [deleteNotice, setDeleteNotice] = useState('')
 
   useEffect(() => {
+    const socket = io(SOCKET_BASE_URL, { transports: ['websocket'] })
+    const refresh = () => {
+      queryClient.invalidateQueries({ queryKey: ['cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['cohort-profile-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['cohort-membership-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['cohort-progressions'] })
+    }
+    socket.on('academic:updated', refresh)
+    socket.on('timetable:changed', refresh)
+    return () => socket.disconnect()
+  }, [queryClient])
+
+  useEffect(() => {
     if (!formError) return undefined
     const timeout = setTimeout(() => setFormError(''), 5000)
     return () => clearTimeout(timeout)
@@ -91,6 +106,13 @@ export default function CohortsPage () {
   })
   const data = cohortPage.items
   const pagination = cohortPage.pagination
+
+  const { data: cohortProfileRequests = [] } = useQuery({
+    queryKey: ['cohort-profile-requests'],
+    queryFn: async () =>
+      toArray(await api.get('/api/academic/cohort-profile-requests')),
+    enabled: canManageCohorts
+  })
 
   const { data: programmes = [] } = useQuery({
     queryKey: ['cohort-programmes'],
@@ -148,6 +170,17 @@ export default function CohortsPage () {
     enabled: Boolean(selectedCohort?.id)
   })
 
+  const { data: membershipRequests = [] } = useQuery({
+    queryKey: ['cohort-membership-requests', selectedCohort?.id],
+    queryFn: async () =>
+      toArray(
+        await api.get(
+          `/api/academic/cohorts/${selectedCohort.id}/membership-requests`
+        )
+      ),
+    enabled: Boolean(selectedCohort?.id && canManageProgression)
+  })
+
   const createCohortMutation = useMutation({
     mutationFn: async payload => {
       const response = await api.post('/api/academic/cohorts', payload)
@@ -174,6 +207,53 @@ export default function CohortsPage () {
       })
     },
     onError: err => setFormError(err.message || 'Unable to create cohort.')
+  })
+
+  const reviewProfileRequestMutation = useMutation({
+    mutationFn: async ({ requestId, decision }) =>
+      api.post(`/api/academic/cohort-profile-requests/${requestId}/review`, {
+        decision
+      }),
+    onSuccess: async () => {
+      await Promise.all(
+        [
+          'cohort-profile-requests',
+          'cohorts',
+          'academic-cohorts',
+          'profile-status',
+          'students',
+          'timetable',
+          'eligible-cohorts'
+        ].map(queryKey =>
+          queryClient.invalidateQueries({ queryKey: [queryKey] })
+        )
+      )
+    }
+  })
+
+  const reviewMembershipMutation = useMutation({
+    mutationFn: async ({ requestId, decision }) =>
+      api.post(
+        `/api/academic/cohorts/${selectedCohort.id}/membership-requests/${requestId}/review`,
+        { decision }
+      ),
+    onSuccess: async () => {
+      await Promise.all(
+        [
+          'cohort-membership-requests',
+          'cohorts',
+          'academic-cohorts',
+          'cohort-progressions',
+          'profile-status',
+          'students',
+          'timetable',
+          'exams',
+          'dashboard-summary'
+        ].map(queryKey =>
+          queryClient.invalidateQueries({ queryKey: [queryKey] })
+        )
+      )
+    }
   })
 
   const deleteCohortMutation = useMutation({
@@ -337,6 +417,83 @@ export default function CohortsPage () {
         )}
       </div>
 
+      {canManageCohorts && cohortProfileRequests.length > 0 && (
+        <section className='content-panel'>
+          <h2>Class representative cohort requests</h2>
+          <div className='academic-records-scroll'>
+            <table>
+              <thead>
+                <tr>
+                  <th>Representative</th>
+                  <th>Programme</th>
+                  <th>Intake</th>
+                  <th>Initial stage</th>
+                  <th>Academic period</th>
+                  <th>Reported students</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cohortProfileRequests.map(request => (
+                  <tr key={request.id}>
+                    <td>
+                      {request.first_name} {request.last_name}
+                      <br />
+                      {request.email}
+                    </td>
+                    <td>
+                      {request.programme_code} · {request.programme_name}
+                    </td>
+                    <td>{request.intake_year}</td>
+                    <td>
+                      {request.cohort_type_name} (Year {request.study_year},
+                      Semester {request.semester_number})
+                    </td>
+                    <td>
+                      {request.semester_name}, {request.academic_year_name}
+                    </td>
+                    <td>{request.student_count}</td>
+                    <td>
+                      <button
+                        type='button'
+                        className='table-action'
+                        disabled={reviewProfileRequestMutation.isPending}
+                        onClick={() =>
+                          reviewProfileRequestMutation.mutate({
+                            requestId: request.id,
+                            decision: 'APPROVED'
+                          })
+                        }
+                      >
+                        Approve
+                      </button>{' '}
+                      <button
+                        type='button'
+                        className='table-action danger'
+                        disabled={reviewProfileRequestMutation.isPending}
+                        onClick={() =>
+                          reviewProfileRequestMutation.mutate({
+                            requestId: request.id,
+                            decision: 'REJECTED'
+                          })
+                        }
+                      >
+                        Reject
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {reviewProfileRequestMutation.error && (
+            <p className='form-error'>
+              {reviewProfileRequestMutation.error.message}
+            </p>
+          )}
+        </section>
+      )}
+
       {showForm && canManageCohorts && (
         <section ref={builderRef} className='content-panel'>
           <form
@@ -369,34 +526,6 @@ export default function CohortsPage () {
                   searchPlaceholder='Search programmes'
                   ariaLabel='Search cohort programmes'
                 />
-              </label>
-              <label>
-                Cohort type
-                <select
-                  value={form.cohort_type_id}
-                  disabled={!form.programme_id}
-                  onChange={event =>
-                    setForm(current => ({
-                      ...current,
-                      cohort_type_id: event.target.value
-                    }))
-                  }
-                >
-                  <option value=''>Select cohort type</option>
-                  {cohortTypes
-                    .filter(
-                      type =>
-                        !selectedCreateSemester ||
-                        Number(type.semester_number) ===
-                          Number(selectedCreateSemester.number)
-                    )
-                    .map(type => (
-                      <option key={type.id} value={type.id}>
-                        {type.name} (Year {type.study_year}, Semester{' '}
-                        {type.semester_number})
-                      </option>
-                    ))}
-                </select>
               </label>
               <label>
                 Academic year
@@ -447,6 +576,34 @@ export default function CohortsPage () {
                     .map(semester => (
                       <option key={semester.id} value={semester.id}>
                         {semester.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Cohort type
+                <select
+                  value={form.cohort_type_id}
+                  disabled={!form.programme_id || !form.semester_id}
+                  onChange={event =>
+                    setForm(current => ({
+                      ...current,
+                      cohort_type_id: event.target.value
+                    }))
+                  }
+                >
+                  <option value=''>Select cohort type</option>
+                  {cohortTypes
+                    .filter(
+                      type =>
+                        !selectedCreateSemester ||
+                        Number(type.semester_number) ===
+                          Number(selectedCreateSemester.number)
+                    )
+                    .map(type => (
+                      <option key={type.id} value={type.id}>
+                        {type.name} (Year {type.study_year}, Semester{' '}
+                        {type.semester_number})
                       </option>
                     ))}
                 </select>
@@ -585,6 +742,7 @@ export default function CohortsPage () {
                   <th>Current stage</th>
                   <th>Current period</th>
                   <th>Students</th>
+                  <th>Profiles submitted</th>
                   {canManageProgression && <th>Actions</th>}
                 </tr>
               </thead>
@@ -611,6 +769,11 @@ export default function CohortsPage () {
                           : 'Needs setup'}
                       </td>
                       <td>{item.student_count ?? item.studentCount ?? 0}</td>
+                      <td>
+                        {item.submitted_profile_count ?? 0}
+                        {Number(item.pending_profile_count) > 0 &&
+                          ` (${item.pending_profile_count} pending)`}
+                      </td>
                       {canManageProgression && (
                         <td>
                           <button
@@ -655,7 +818,7 @@ export default function CohortsPage () {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={canManageProgression ? 7 : 6}>
+                    <td colSpan={canManageProgression ? 8 : 7}>
                       No cohorts match the selected filters.
                     </td>
                   </tr>
@@ -717,6 +880,75 @@ export default function CohortsPage () {
                 Close
               </button>
             </div>
+            <section>
+              <h3>Student profile submissions</h3>
+              {membershipRequests.length ? (
+                <div className='academic-records-scroll'>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Student</th>
+                        <th>Student number</th>
+                        <th>Academic period</th>
+                        <th>Cohort type</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {membershipRequests.map(request => (
+                        <tr key={request.id}>
+                          <td>
+                            {request.first_name} {request.last_name}
+                            <br />
+                            {request.email}
+                          </td>
+                          <td>{request.student_number || '—'}</td>
+                          <td>
+                            {request.semester_name}, {request.academic_year_name}
+                          </td>
+                          <td>{request.cohort_type_name}</td>
+                          <td>
+                            <button
+                              type='button'
+                              className='table-action'
+                              disabled={reviewMembershipMutation.isPending}
+                              onClick={() =>
+                                reviewMembershipMutation.mutate({
+                                  requestId: request.id,
+                                  decision: 'APPROVED'
+                                })
+                              }
+                            >
+                              Approve
+                            </button>{' '}
+                            <button
+                              type='button'
+                              className='table-action danger'
+                              disabled={reviewMembershipMutation.isPending}
+                              onClick={() =>
+                                reviewMembershipMutation.mutate({
+                                  requestId: request.id,
+                                  decision: 'REJECTED'
+                                })
+                              }
+                            >
+                              Reject
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className='muted'>No student profiles are awaiting review.</p>
+              )}
+              {reviewMembershipMutation.error && (
+                <p className='form-error'>
+                  {reviewMembershipMutation.error.message}
+                </p>
+              )}
+            </section>
             <form
               className='stack-form academic-mobile-single-column-form'
               onSubmit={handleProgressionSubmit}

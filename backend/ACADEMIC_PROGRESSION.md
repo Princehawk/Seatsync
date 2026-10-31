@@ -38,6 +38,31 @@ progression workflow. Each programme has at most one permanent cohort per
 intake year; subsequent stages are added to that cohort rather than creating a
 new cohort row.
 
+## Profile submission and approvals
+
+After the academic progression migration, run the cohort membership migration:
+
+```sh
+npm run migrate:cohort-membership
+```
+
+Students submit their academic year, intake year, faculty, department,
+programme, and cohort type. The app resolves that selection to the specific
+intake cohort and matching progression period; a class representative or
+administrator must approve the membership request before the student is linked
+to that cohort and sees its events and exams.
+
+A class representative submits a cohort profile with the same academic
+identifiers and an initial student count. An administrator approves the
+request, which creates the stable intake cohort, its first progression record,
+and the representative assignment. Class representatives can then review
+student profile submissions for their cohort. Submitted-profile counts include
+both approved students and pending membership requests.
+
+Lecturer profiles include the cohort types they teach. Semester types are
+selected from existing database records in academic setup; the setup screen no
+longer provides a semester-type creation form.
+
 ## Rollback and recovery
 
 The migration is additive but also changes column nullability, adds foreign

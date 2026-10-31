@@ -10,11 +10,14 @@ import {
   addAcademicYear,
   getSemesters,
   getSemesterTypes,
-  addSemesterType,
   getCohortTypes,
   getCohortProgressions,
   addCohortProgression,
   getEligibleCohorts,
+  getPendingCohortProfileRequests,
+  reviewPendingCohortProfileRequest,
+  getCohortMembershipRequests,
+  reviewCohortMembership,
   addSemester,
   getCohorts,
   addCohort,
@@ -117,7 +120,6 @@ router.get(
   requireRole('ADMIN', 'LECTURER', 'STUDENT', 'CLASS_REP'),
   getSemesterTypes
 )
-router.post('/semester-types', requireRole('ADMIN'), addSemesterType)
 router.post('/semesters', requireRole('ADMIN'), addSemester)
 router.put(
   '/semesters/:id',
@@ -145,6 +147,26 @@ router.get(
   getEligibleCohorts
 )
 router.post('/cohorts', requireRole('ADMIN'), addCohort)
+router.get(
+  '/cohort-profile-requests',
+  requireRole('ADMIN'),
+  getPendingCohortProfileRequests
+)
+router.post(
+  '/cohort-profile-requests/:requestId/review',
+  requireRole('ADMIN'),
+  reviewPendingCohortProfileRequest
+)
+router.get(
+  '/cohorts/:id/membership-requests',
+  requireRole('ADMIN', 'CLASS_REP'),
+  getCohortMembershipRequests
+)
+router.post(
+  '/cohorts/:id/membership-requests/:requestId/review',
+  requireRole('ADMIN', 'CLASS_REP'),
+  reviewCohortMembership
+)
 router.get(
   '/cohorts/:id/progressions',
   requireRole('ADMIN', 'CLASS_REP'),

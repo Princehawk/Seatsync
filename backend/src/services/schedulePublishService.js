@@ -71,6 +71,7 @@ const assertNoTimetableConflict = async (
     academicYearId: get(event, 'academic_year_id', 'academicYearId'),
     semesterId: get(event, 'semester_id', 'semesterId'),
     unitId: get(event, 'course_id', 'courseId'),
+    lecturerId: get(event, 'lecturer_id', 'lecturerId'),
     programmeIds: get(event, 'programme_ids', 'programmeIds') || [],
     cohortIds
   })

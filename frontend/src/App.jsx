@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { io } from 'socket.io-client'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleProtectedRoute from './components/RoleProtectedRoute'
@@ -22,6 +22,7 @@ import LecturersPage from './pages/LecturersPage'
 import AcademicSetupPage from './pages/AcademicSetupPage'
 import ReportsPage from './pages/ReportsPage'
 import LecturerProfilePage from './pages/LecturerProfilePage'
+import StudentAcademicProfilePage from './pages/StudentAcademicProfilePage'
 import { api } from './api/client'
 import './App.css'
 import ProfileCompletionModal from './components/ProfileCompletionModal'
@@ -30,6 +31,7 @@ import { SOCKET_BASE_URL } from './config.js'
 function ProtectedLayout () {
   const queryClient = useQueryClient()
   const { user, logout } = useAuth()
+  const location = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
@@ -47,6 +49,15 @@ function ProtectedLayout () {
     }
 
     socket.on('timetable:changed', refreshScheduleData)
+    socket.on('academic:updated', () => {
+      queryClient.invalidateQueries({ queryKey: ['profile-status'] })
+      queryClient.invalidateQueries({ queryKey: ['student-academic-profile'] })
+      queryClient.invalidateQueries({ queryKey: ['cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['academic-cohorts'] })
+      queryClient.invalidateQueries({ queryKey: ['cohort-profile-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['cohort-membership-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['students'] })
+    })
     socket.on('audit:changed', () => {
       queryClient.invalidateQueries({ queryKey: ['audit-logs'] })
     })
@@ -113,6 +124,18 @@ function ProtectedLayout () {
           </button>
           <strong>SeatSync</strong>
         </div>
+        {(profileStatus?.pendingApproval ||
+          profileStatus?.needsResubmission) && (
+          <section className='content-panel'>
+            <p>
+              {profileStatus.profileRequestStatus === 'REJECTED'
+                ? 'Your academic profile request was not approved. Update and resubmit your details.'
+                : profileStatus.role === 'CLASS_REP'
+                ? 'Your cohort profile is awaiting administrator approval.'
+                : 'Your cohort membership is awaiting class representative or administrator approval.'}
+            </p>
+          </section>
+        )}
         <Routes>
           <Route path='/dashboard' element={<DashboardPage />} />
           <Route path='/timetable' element={<TimetablePage />} />
@@ -183,6 +206,14 @@ function ProtectedLayout () {
             }
           />
           <Route
+            path='/academic/profile'
+            element={
+              <RoleProtectedRoute allowedRoles={['STUDENT', 'CLASS_REP']}>
+                <StudentAcademicProfilePage />
+              </RoleProtectedRoute>
+            }
+          />
+          <Route
             path='/exams'
             element={
               <RoleProtectedRoute
@@ -218,9 +249,11 @@ function ProtectedLayout () {
           <Route path='*' element={<Navigate to='/dashboard' replace />} />
         </Routes>
       </main>
-      {profileStatus && !profileStatus.complete && (
-        <ProfileCompletionModal role={profileStatus.role} />
-      )}
+      {profileStatus &&
+        !profileStatus.complete &&
+        location.pathname !== '/academic/profile' && (
+          <ProfileCompletionModal role={profileStatus.role} />
+        )}
     </div>
   )
 }

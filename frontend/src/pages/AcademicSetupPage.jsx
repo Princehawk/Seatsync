@@ -25,7 +25,6 @@ const sectionConfig = [
   { key: 'department', label: 'Department' },
   { key: 'programme', label: 'Programme' },
   { key: 'academicYear', label: 'Academic year' },
-  { key: 'semesterType', label: 'Semester type' },
   { key: 'semester', label: 'Semester' },
   { key: 'cohort', label: 'Cohort' }
 ]
@@ -35,7 +34,6 @@ const initialForms = {
   department: { name: '', code: '', faculty_id: '' },
   programme: { name: '', code: '', department_id: '', duration_years: 4 },
   academicYear: { name: '', start_date: '', end_date: '' },
-  semesterType: { name: '', number: '' },
   semester: {
     name: '',
     number: '',
@@ -102,7 +100,6 @@ export default function AcademicSetupPage () {
     programme: '/api/academic/programmes',
     academicYear: '/api/academic/academic-years',
     semester: '/api/academic/semesters',
-    semesterType: '/api/academic/semester-types',
     cohort: '/api/academic/cohorts'
   }
 
@@ -481,13 +478,6 @@ export default function AcademicSetupPage () {
         end_date: form.end_date
       })
     },
-    semesterType: {
-      endpoint: '/api/academic/semester-types',
-      payloadBuilder: form => ({
-        name: form.name.trim(),
-        number: Number(form.number) || null
-      })
-    },
     cohort: {
       endpoint: '/api/academic/cohorts',
       payloadBuilder: form => ({
@@ -543,7 +533,6 @@ export default function AcademicSetupPage () {
       programme: programmes,
       academicYear: academicYears,
       semester: semesters,
-      semesterType: semesterTypes,
       cohort: cohorts
     }
     const rows = map[section] || []
@@ -574,19 +563,6 @@ export default function AcademicSetupPage () {
     }
     if (section === 'academicYear' && compare('name')) {
       return 'An academic year with that name already exists.'
-    }
-    if (
-      section === 'semesterType' &&
-      semesterTypes.some(item => {
-        if (currentId && Number(item.id) === Number(currentId)) return false
-        return (
-          String(item.name || '').trim().toLowerCase() ===
-            String(payload.name || '').trim().toLowerCase() ||
-          Number(item.number) === Number(payload.number)
-        )
-      })
-    ) {
-      return 'A semester type with that name or number already exists.'
     }
     if (section === 'semester') {
       const sameYear = Number(payload.academic_year_id || 0)
@@ -673,13 +649,6 @@ export default function AcademicSetupPage () {
       return
     }
 
-    if (
-      section === 'semesterType' &&
-      (!payload.name || !Number.isInteger(payload.number) || payload.number < 1)
-    ) {
-      toast.error('Semester type name and a positive number are required.')
-      return
-    }
     if (
       section === 'cohort' &&
       (!payload.programme_id ||
@@ -955,41 +924,6 @@ export default function AcademicSetupPage () {
                         handleFieldChange(
                           'academicYear',
                           'end_date',
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-                </>
-              )}
-
-              {activeSection === 'semesterType' && (
-                <>
-                  <label>
-                    Semester type name
-                    <input
-                      value={forms.semesterType.name}
-                      onChange={event =>
-                        handleFieldChange(
-                          'semesterType',
-                          'name',
-                          event.target.value
-                        )
-                      }
-                      placeholder='Semester 1'
-                    />
-                  </label>
-                  <label>
-                    Semester number
-                    <input
-                      type='number'
-                      min='1'
-                      step='1'
-                      value={forms.semesterType.number}
-                      onChange={event =>
-                        handleFieldChange(
-                          'semesterType',
-                          'number',
                           event.target.value
                         )
                       }
