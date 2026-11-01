@@ -71,82 +71,148 @@ export const reviewCohortProfileRequest = async (
       ) {
         throw new Error('The requested cohort type does not match its semester.')
       }
+      const [representatives] = await connection.execute(
+        `SELECT c.id AS cohort_id, c.programme_id, c.intake_year,
+            st.id AS student_id
+         FROM cohort_representatives cr
+         JOIN students st ON st.id = cr.student_id
+         JOIN cohorts c ON c.id = cr.cohort_id
+         WHERE st.user_id = ? AND cr.is_active = TRUE
+           AND (cr.end_date IS NULL OR cr.end_date >= CURDATE())
+         LIMIT 1 FOR UPDATE`,
+        [request.user_id]
+      )
+      const existingRepresentative = representatives[0]
+      if (
+        existingRepresentative &&
+        (Number(existingRepresentative.programme_id) !==
+          Number(request.programme_id) ||
+          Number(existingRepresentative.intake_year) !==
+            Number(request.intake_year))
+      ) {
+        throw new Error(
+          'An approved cohort profile cannot change its programme or intake year.'
+        )
+      }
+      const duplicateConditions = existingRepresentative
+        ? 'AND id <> ?'
+        : ''
+      const duplicateParams = existingRepresentative
+        ? [
+            request.programme_id,
+            request.intake_year,
+            existingRepresentative.cohort_id
+          ]
+        : [request.programme_id, request.intake_year]
       const [duplicates] = await connection.execute(
-        'SELECT id FROM cohorts WHERE programme_id = ? AND intake_year = ? LIMIT 1 FOR UPDATE',
-        [request.programme_id, request.intake_year]
+        `SELECT id FROM cohorts
+         WHERE programme_id = ? AND intake_year = ? ${duplicateConditions}
+         LIMIT 1 FOR UPDATE`,
+        duplicateParams
       )
       if (duplicates.length) {
         throw new Error(
           'A cohort already exists for this programme and intake year.'
         )
       }
-      const cohortName = `${request.intake_year} Intake`
-      const [cohort] = await connection.execute(
-        `INSERT INTO cohorts
-          (programme_id, intake_year, name, student_count, is_active)
-         VALUES (?, ?, ?, ?, TRUE)`,
-        [
-          request.programme_id,
-          request.intake_year,
-          cohortName,
-          request.student_count
-        ]
-      )
-      cohortId = cohort.insertId
-      await connection.execute(
-        `INSERT INTO cohort_progressions
-          (cohort_id, academic_year_id, semester_id, cohort_type_id, student_count)
-         VALUES (?, ?, ?, ?, ?)`,
-        [
-          cohortId,
-          request.academic_year_id,
-          request.semester_id,
-          request.cohort_type_id,
-          request.student_count
-        ]
-      )
 
-      const [students] = await connection.execute(
-        'SELECT id FROM students WHERE user_id = ? LIMIT 1 FOR UPDATE',
-        [request.user_id]
-      )
-      let studentId = students[0]?.id
-      if (studentId) {
+      let studentId
+      if (existingRepresentative) {
+        cohortId = existingRepresentative.cohort_id
+        studentId = existingRepresentative.student_id
         await connection.execute(
-          `UPDATE students SET programme_id = ?, cohort_id = ?,
-            current_year = ?, admission_year = ?, status = 'ACTIVE'
-           WHERE id = ?`,
+          'UPDATE cohorts SET student_count = ? WHERE id = ?',
+          [request.student_count, cohortId]
+        )
+        await connection.execute(
+          `INSERT INTO cohort_progressions
+            (cohort_id, academic_year_id, semester_id, cohort_type_id, student_count)
+           VALUES (?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             academic_year_id = VALUES(academic_year_id),
+             cohort_type_id = VALUES(cohort_type_id),
+             student_count = VALUES(student_count)`,
           [
-            request.programme_id,
             cohortId,
-            request.study_year,
-            request.intake_year,
-            studentId
+            request.academic_year_id,
+            request.semester_id,
+            request.cohort_type_id,
+            request.student_count
           ]
+        )
+        await connection.execute(
+          'UPDATE students SET current_year = ? WHERE id = ?',
+          [request.study_year, studentId]
         )
       } else {
-        const [student] = await connection.execute(
-          `INSERT INTO students
-            (user_id, student_number, programme_id, cohort_id, current_year,
-             admission_year, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+        const cohortName = `${request.intake_year} Intake`
+        const [cohort] = await connection.execute(
+          `INSERT INTO cohorts
+            (programme_id, intake_year, name, student_count, is_active)
+           VALUES (?, ?, ?, ?, TRUE)`,
           [
-            request.user_id,
-            `STU-${request.user_id}`,
             request.programme_id,
-            cohortId,
-            request.study_year,
-            request.intake_year
+            request.intake_year,
+            cohortName,
+            request.student_count
           ]
         )
-        studentId = student.insertId
+        cohortId = cohort.insertId
+        await connection.execute(
+          `INSERT INTO cohort_progressions
+            (cohort_id, academic_year_id, semester_id, cohort_type_id, student_count)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            cohortId,
+            request.academic_year_id,
+            request.semester_id,
+            request.cohort_type_id,
+            request.student_count
+          ]
+        )
+
+        const [students] = await connection.execute(
+          'SELECT id FROM students WHERE user_id = ? LIMIT 1 FOR UPDATE',
+          [request.user_id]
+        )
+        studentId = students[0]?.id
+        if (studentId) {
+          await connection.execute(
+            `UPDATE students SET programme_id = ?, cohort_id = ?,
+              current_year = ?, admission_year = ?, status = 'ACTIVE'
+             WHERE id = ?`,
+            [
+              request.programme_id,
+              cohortId,
+              request.study_year,
+              request.intake_year,
+              studentId
+            ]
+          )
+        } else {
+          const [student] = await connection.execute(
+            `INSERT INTO students
+              (user_id, student_number, programme_id, cohort_id, current_year,
+               admission_year, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+            [
+              request.user_id,
+              `STU-${request.user_id}`,
+              request.programme_id,
+              cohortId,
+              request.study_year,
+              request.intake_year
+            ]
+          )
+          studentId = student.insertId
+        }
+        await connection.execute(
+          `INSERT INTO cohort_representatives
+            (cohort_id, student_id, start_date, is_active)
+           VALUES (?, ?, CURDATE(), TRUE)`,
+          [cohortId, studentId]
+        )
       }
-      await connection.execute(
-        `INSERT INTO cohort_representatives
-          (cohort_id, student_id, start_date, is_active)
-         VALUES (?, ?, CURDATE(), TRUE)`,
-        [cohortId, studentId]
-      )
     }
 
     await connection.execute(
@@ -243,10 +309,11 @@ export const reviewCohortMembershipRequest = async (
     }
     if (decision === 'APPROVED') {
       const [students] = await connection.execute(
-        'SELECT id FROM students WHERE user_id = ? LIMIT 1 FOR UPDATE',
+        'SELECT id, cohort_id FROM students WHERE user_id = ? LIMIT 1 FOR UPDATE',
         [request.user_id]
       )
       if (!students[0]) throw new Error('Student record was not found.')
+      const previousCohortId = students[0].cohort_id
       await connection.execute(
         `UPDATE students SET programme_id = ?, cohort_id = ?,
           current_year = ?, admission_year = ?, status = 'ACTIVE'
@@ -259,20 +326,33 @@ export const reviewCohortMembershipRequest = async (
           students[0].id
         ]
       )
+      if (
+        previousCohortId &&
+        Number(previousCohortId) !== Number(request.cohort_id)
+      ) {
+        const [previousCountRows] = await connection.execute(
+          `SELECT COUNT(*) AS total FROM students
+           WHERE cohort_id = ? AND status = 'ACTIVE'`,
+          [previousCohortId]
+        )
+        const previousCount = Number(previousCountRows[0].total)
+        await connection.execute(
+          'UPDATE cohorts SET student_count = ? WHERE id = ?',
+          [previousCount, previousCohortId]
+        )
+        await connection.execute(
+          'UPDATE cohort_progressions SET student_count = ? WHERE cohort_id = ?',
+          [previousCount, previousCohortId]
+        )
+      }
       const [countRows] = await connection.execute(
         `SELECT COUNT(*) AS total FROM students
          WHERE cohort_id = ? AND status = 'ACTIVE'`,
         [request.cohort_id]
       )
       await connection.execute(
-        `UPDATE cohort_progressions SET student_count = ?
-         WHERE cohort_id = ? AND academic_year_id = ? AND semester_id = ?`,
-        [
-          Number(countRows[0].total),
-          request.cohort_id,
-          request.academic_year_id,
-          request.semester_id
-        ]
+        'UPDATE cohort_progressions SET student_count = ? WHERE cohort_id = ?',
+        [Number(countRows[0].total), request.cohort_id]
       )
       await connection.execute(
         'UPDATE cohorts SET student_count = ? WHERE id = ?',

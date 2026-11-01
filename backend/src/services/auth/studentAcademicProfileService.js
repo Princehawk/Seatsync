@@ -45,17 +45,29 @@ const getAcademicSelection = async (
 
 export const getStudentAcademicProfileStatus = async (userId, role) => {
   if (role === 'CLASS_REP') {
-    const requests = await query(
-      `SELECT status FROM cohort_profile_requests
-       WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
-      [userId]
-    )
+    const [requests, representatives] = await Promise.all([
+      query(
+        `SELECT status FROM cohort_profile_requests
+         WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      ),
+      query(
+        `SELECT cr.id FROM cohort_representatives cr
+         JOIN students s ON s.id = cr.student_id
+         WHERE s.user_id = ? AND cr.is_active = TRUE
+           AND (cr.end_date IS NULL OR cr.end_date >= CURDATE()) LIMIT 1`,
+        [userId]
+      )
+    ])
     if (requests[0]) {
+      const hasApprovedCohort = Boolean(representatives[0])
       return {
-        complete: requests[0].status !== 'REJECTED',
+        complete:
+          requests[0].status !== 'REJECTED' || hasApprovedCohort,
         role,
         pendingApproval: requests[0].status === 'PENDING',
-        needsResubmission: requests[0].status === 'REJECTED',
+        needsResubmission:
+          requests[0].status === 'REJECTED' && !hasApprovedCohort,
         profileRequestStatus: requests[0].status
       }
     }
@@ -73,7 +85,13 @@ export const getStudentAcademicProfileStatus = async (userId, role) => {
     )
   ])
   if (students[0]?.cohort_id) {
-    return { complete: true, role, pendingApproval: false }
+    return {
+      complete: true,
+      role,
+      pendingApproval: requests[0]?.status === 'PENDING',
+      needsResubmission: requests[0]?.status === 'REJECTED',
+      profileRequestStatus: requests[0]?.status
+    }
   }
   if (requests[0]) {
     return {
@@ -100,7 +118,14 @@ export const getStudentAcademicProfile = async (userId, role) => {
           cp.cohort_type_id, ct.name AS cohort_type_name,
           cp.student_count AS cohort_student_count,
           (SELECT COUNT(*) FROM students submitted
-           WHERE submitted.cohort_id = c.id) +
+           WHERE submitted.cohort_id = c.id
+             AND NOT EXISTS (
+               SELECT 1 FROM cohort_representatives rep
+               WHERE rep.cohort_id = c.id
+                 AND rep.student_id = submitted.id
+                 AND rep.is_active = TRUE
+                 AND (rep.end_date IS NULL OR rep.end_date >= CURDATE())
+             )) +
           (SELECT COUNT(*) FROM cohort_membership_requests pending
            WHERE pending.cohort_id = c.id AND pending.status = 'PENDING')
             AS submitted_profile_count
@@ -141,10 +166,12 @@ export const getStudentAcademicProfile = async (userId, role) => {
         )
       : Promise.resolve([]),
     query(
-      `SELECT cmr.status, cmr.cohort_id, c.name AS cohort_name,
+      `SELECT cmr.status, cmr.cohort_id, cmr.academic_year_id,
+          cmr.semester_id, cmr.cohort_type_id, c.name AS cohort_name,
           c.intake_year, c.student_count AS cohort_student_count,
-          p.name AS programme_name, p.duration_years,
-          d.name AS department_name, f.name AS faculty_name,
+          c.programme_id, p.name AS programme_name, p.duration_years,
+          d.id AS department_id, d.name AS department_name,
+          f.id AS faculty_id, f.name AS faculty_name,
           ay.name AS academic_year_name, sem.name AS semester_name,
           ct.name AS cohort_type_name
        FROM cohort_membership_requests cmr
@@ -170,7 +197,8 @@ export const getStudentAcademicProfile = async (userId, role) => {
 export const completeStudentAcademicProfile = async (
   userId,
   role,
-  payload
+  payload,
+  { allowAssignedStudent = false, allowPendingRequestEdit = false } = {}
 ) => {
   const facultyId = Number(payload.facultyId)
   const departmentId = Number(payload.departmentId)
@@ -208,9 +236,37 @@ export const completeStudentAcademicProfile = async (
       if (!Number.isInteger(studentCount) || studentCount < 0) {
         throw new Error('Enter a non-negative whole-number student count.')
       }
+      const [representativeCohorts] = await connection.execute(
+        `SELECT c.id, c.programme_id, c.intake_year
+         FROM cohort_representatives cr
+         JOIN students st ON st.id = cr.student_id
+         JOIN cohorts c ON c.id = cr.cohort_id
+         WHERE st.user_id = ? AND cr.is_active = TRUE
+           AND (cr.end_date IS NULL OR cr.end_date >= CURDATE())
+         LIMIT 1 FOR UPDATE`,
+        [userId]
+      )
+      const existingRepresentativeCohort = representativeCohorts[0]
+      if (
+        existingRepresentativeCohort &&
+        (Number(existingRepresentativeCohort.programme_id) !== programmeId ||
+          Number(existingRepresentativeCohort.intake_year) !== intakeYear)
+      ) {
+        throw new Error(
+          'A class representative cannot change the identity of an approved cohort. Contact an administrator if this is incorrect.'
+        )
+      }
+      const duplicateConditions = existingRepresentativeCohort
+        ? 'AND id <> ?'
+        : ''
+      const duplicateParams = existingRepresentativeCohort
+        ? [programmeId, intakeYear, existingRepresentativeCohort.id]
+        : [programmeId, intakeYear]
       const [existingCohort] = await connection.execute(
-        'SELECT id FROM cohorts WHERE programme_id = ? AND intake_year = ? LIMIT 1',
-        [programmeId, intakeYear]
+        `SELECT id FROM cohorts
+         WHERE programme_id = ? AND intake_year = ? ${duplicateConditions}
+         LIMIT 1`,
+        duplicateParams
       )
       if (existingCohort.length) {
         throw new Error(
@@ -222,7 +278,10 @@ export const completeStudentAcademicProfile = async (
          WHERE user_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE`,
         [userId]
       )
-      if (existingRequest[0]?.status === 'PENDING') {
+      if (
+        existingRequest[0]?.status === 'PENDING' &&
+        !allowPendingRequestEdit
+      ) {
         throw new Error('Your cohort profile is already awaiting admin approval.')
       }
       await connection.execute(
@@ -282,16 +341,18 @@ export const completeStudentAcademicProfile = async (
       'SELECT id, cohort_id FROM students WHERE user_id = ? LIMIT 1 FOR UPDATE',
       [userId]
     )
-    if (students[0]?.cohort_id) {
+    if (students[0]?.cohort_id && !allowAssignedStudent) {
       throw new Error('Your student account is already assigned to a cohort.')
     }
     let studentId = students[0]?.id
     if (studentId) {
-      await connection.execute(
-        `UPDATE students SET programme_id = ?, current_year = ?,
-          admission_year = ?, status = 'PENDING' WHERE id = ?`,
-        [programmeId, selection.study_year, intakeYear, studentId]
-      )
+      if (!students[0].cohort_id) {
+        await connection.execute(
+          `UPDATE students SET programme_id = ?, current_year = ?,
+            admission_year = ?, status = 'PENDING' WHERE id = ?`,
+          [programmeId, selection.study_year, intakeYear, studentId]
+        )
+      }
     } else {
       const [student] = await connection.execute(
         `INSERT INTO students
@@ -341,3 +402,9 @@ export const completeStudentAcademicProfile = async (
     connection.release()
   }
 }
+
+export const updateStudentAcademicProfile = (userId, role, payload) =>
+  completeStudentAcademicProfile(userId, role, payload, {
+    allowAssignedStudent: true,
+    allowPendingRequestEdit: true
+  })

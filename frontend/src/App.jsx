@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { io } from 'socket.io-client'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleProtectedRoute from './components/RoleProtectedRoute'
@@ -31,7 +31,6 @@ import { SOCKET_BASE_URL } from './config.js'
 function ProtectedLayout () {
   const queryClient = useQueryClient()
   const { user, logout } = useAuth()
-  const location = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
@@ -251,9 +250,7 @@ function ProtectedLayout () {
       </main>
       {profileStatus &&
         !profileStatus.complete &&
-        location.pathname !== '/academic/profile' && (
-          <ProfileCompletionModal role={profileStatus.role} />
-        )}
+        <ProfileCompletionModal role={profileStatus.role} />}
     </div>
   )
 }

@@ -5,25 +5,44 @@ import { useAuth } from '../context/AuthContext'
 
 const EMPTY_LIST = []
 
-export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
+const createAcademicForm = profile => ({
+  facultyIds: [],
+  departmentIds: [],
+  programmeIds: [],
+  unitIds: [],
+  cohortTypeIds: [],
+  facultyId: String(profile?.facultyId ?? profile?.faculty_id ?? ''),
+  departmentId: String(profile?.departmentId ?? profile?.department_id ?? ''),
+  programmeId: String(profile?.programmeId ?? profile?.programme_id ?? ''),
+  academicYearId: String(
+    profile?.academicYearId ?? profile?.academic_year_id ?? ''
+  ),
+  intakeYear: String(profile?.intakeYear ?? profile?.intake_year ?? ''),
+  cohortTypeId: String(profile?.cohortTypeId ?? profile?.cohort_type_id ?? ''),
+  studentCount: String(
+    profile?.studentCount ??
+      profile?.student_count ??
+      profile?.cohort_student_count ??
+      ''
+  )
+})
+
+export default function ProfileCompletionModal ({
+  role,
+  variant = 'modal',
+  initialProfile,
+  editing = false,
+  lockCohortIdentity = false,
+  onCancel,
+  onSaved
+}) {
   const queryClient = useQueryClient()
   const { logout } = useAuth()
   const [departmentSearch, setDepartmentSearch] = useState('')
   const [programmeSearch, setProgrammeSearch] = useState('')
-  const [form, setForm] = useState({
-    facultyIds: [],
-    departmentIds: [],
-    programmeIds: [],
-    unitIds: [],
-    cohortTypeIds: [],
-    facultyId: '',
-    departmentId: '',
-    programmeId: '',
-    academicYearId: '',
-    intakeYear: '',
-    cohortTypeId: '',
-    studentCount: ''
-  })
+  const [formState, setFormState] = useState(() =>
+    initialProfile ? createAcademicForm(initialProfile) : null
+  )
   const isLecturer = role === 'LECTURER'
   const [error, setError] = useState('')
   useEffect(() => {
@@ -36,6 +55,22 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
     queryFn: async () =>
       (await api.get('/api/auth/registration-options')).data || {}
   })
+  const { data: savedProfileResponse } = useQuery({
+    queryKey: ['student-academic-profile', 'profile-modal'],
+    queryFn: async () => (await api.get('/api/auth/student-profile')).data,
+    enabled: !isLecturer && !initialProfile
+  })
+  const savedProfile =
+    savedProfileResponse?.cohortProfileRequest ||
+    savedProfileResponse?.membershipRequest ||
+    savedProfileResponse?.student
+  const form = formState || createAcademicForm(initialProfile || savedProfile)
+  const setForm = update =>
+    setFormState(current => {
+      const currentForm =
+        current || createAcademicForm(initialProfile || savedProfile)
+      return typeof update === 'function' ? update(currentForm) : update
+    })
   const departments = Array.isArray(options.departments)
     ? options.departments
     : EMPTY_LIST
@@ -111,15 +146,23 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
       ),
     [units, form.programmeIds]
   )
+  const selectedProgramme = programmes.find(
+    item => String(item.id) === String(form.programmeId)
+  )
 
   const mutation = useMutation({
-    mutationFn: payload => api.post('/api/auth/complete-profile', payload),
+    mutationFn: payload =>
+      editing
+        ? api.put('/api/auth/student-profile', payload)
+        : api.post('/api/auth/complete-profile', payload),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['profile-status'] }),
-        queryClient.invalidateQueries({ queryKey: ['student-academic-profile'] })
+        queryClient.invalidateQueries({ queryKey: ['student-academic-profile'] }),
+        queryClient.invalidateQueries({ queryKey: ['student-academic-profile', 'profile-modal'] })
       ])
       setError('')
+      onSaved?.()
     },
     onError: err => setError(err.message || 'Unable to save academic profile.')
   })
@@ -272,7 +315,9 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
   return (
     <div
       className={
-        variant === 'page' ? 'page-shell' : 'profile-modal-backdrop'
+        variant === 'page'
+          ? 'student-academic-profile-editor'
+          : 'profile-modal-backdrop'
       }
     >
       <section
@@ -282,20 +327,27 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
             : 'profile-modal content-panel'
         }
       >
-        <p className='eyebrow'>Complete academic profile</p>
-        <h2>
-          {isLecturer
-            ? 'Teaching assignments'
-            : isClassRep
-            ? 'Cohort academic profile'
-            : 'Student academic profile'}
-        </h2>
-        <p className='muted'>
-          Complete these details before using the academic workspace. Removing a
-          faculty, department, or programme also clears its dependent
-          selections.
-        </p>
-        <form className='stack-form profile-completion-form' onSubmit={submit}>
+        {variant !== 'page' && (
+          <>
+            <p className='eyebrow'>Complete academic profile</p>
+            <h2>
+              {isLecturer
+                ? 'Teaching assignments'
+                : isClassRep
+                  ? 'Cohort academic profile'
+                  : 'Student academic profile'}
+            </h2>
+            <p className='muted'>
+              Complete these details before using the academic workspace.
+            </p>
+          </>
+        )}
+        <form
+          className={`stack-form profile-completion-form ${
+            variant === 'page' ? 'student-academic-profile-form' : ''
+          }`}
+          onSubmit={submit}
+        >
           {isLecturer ? (
             <>
               <fieldset className='selection-container'>
@@ -425,7 +477,7 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
               </fieldset>
             </>
           ) : (
-            <>
+            <div className='student-academic-profile-fields'>
               <label>
                 Academic year
                 <select
@@ -452,6 +504,7 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
                   min='1900'
                   step='1'
                   value={form.intakeYear}
+                  disabled={lockCohortIdentity}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -464,6 +517,7 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
                 Faculty
                 <select
                   value={form.facultyId}
+                  disabled={lockCohortIdentity}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -486,7 +540,7 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
                 Department
                 <select
                   value={form.departmentId}
-                  disabled={!form.facultyId}
+                  disabled={!form.facultyId || lockCohortIdentity}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -514,7 +568,7 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
                 Programme
                 <select
                   value={form.programmeId}
-                  disabled={!form.departmentId}
+                  disabled={!form.departmentId || lockCohortIdentity}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -575,7 +629,17 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
                   />
                 </label>
               )}
-            </>
+              {selectedProgramme && (
+                <label>
+                  Programme duration
+                  <input
+                    value={`${selectedProgramme.duration_years} years`}
+                    readOnly
+                    aria-readonly='true'
+                  />
+                </label>
+              )}
+            </div>
           )}
           {error && <p className='form-error'>{error}</p>}
           <button
@@ -583,18 +647,34 @@ export default function ProfileCompletionModal ({ role, variant = 'modal' }) {
             className='primary-button'
             disabled={mutation.isPending}
           >
-            {mutation.isPending ? 'Saving...' : 'Save academic profile'}
+            {mutation.isPending
+              ? 'Saving...'
+              : editing
+              ? 'Save changes'
+              : 'Save academic profile'}
           </button>
+          {editing && onCancel && (
+            <button
+              type='button'
+              className='secondary-button'
+              onClick={onCancel}
+              disabled={mutation.isPending}
+            >
+              Cancel
+            </button>
+          )}
         </form>
-        <div className='profile-completion-logout'>
-          <button
-            type='button'
-            className='secondary-button'
-            onClick={() => void logout()}
-          >
-            Log out
-          </button>
-        </div>
+        {variant !== 'page' && (
+          <div className='profile-completion-logout'>
+            <button
+              type='button'
+              className='secondary-button'
+              onClick={() => void logout()}
+            >
+              Log out
+            </button>
+          </div>
+        )}
       </section>
     </div>
   )

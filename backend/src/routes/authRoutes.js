@@ -6,6 +6,7 @@ import {
   registrationOptions,
   profileStatus,
   studentAcademicProfile,
+  updateStudentProfile,
   completeProfile,
   lecturerProfile,
   updateLecturerProfile,
@@ -27,6 +28,12 @@ router.get(
   requireAuth,
   requireRole('STUDENT', 'CLASS_REP'),
   studentAcademicProfile
+)
+router.put(
+  '/student-profile',
+  requireAuth,
+  requireRole('STUDENT', 'CLASS_REP'),
+  updateStudentProfile
 )
 router.post('/complete-profile', requireAuth, completeProfile)
 router.get(
